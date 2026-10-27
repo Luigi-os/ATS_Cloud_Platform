@@ -1,0 +1,1 @@
+# Esportazione dei valori chiave (es. ARN delle risorse o URL dei bucket) per verificare il completamento del deployment.

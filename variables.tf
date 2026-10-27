@@ -1,0 +1,1 @@
+# Dichiarazione di tutte le variabili di input (es. regione AWS, prefisso del progetto, soglie di rete).

@@ -1,0 +1,1 @@
+# Configurazione della tabella NoSQL (CandidatesTable).

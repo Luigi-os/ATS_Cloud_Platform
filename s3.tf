@@ -1,0 +1,1 @@
+# Dichiarazione dei bucket di ingestion (cv-incoming-bucket) e di archiviazione (cv-archive-bucket).

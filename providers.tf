@@ -1,0 +1,1 @@
+# Contiene il blocco di configurazione di Terraform e specifica le versioni minime del provider AWS.

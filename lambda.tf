@@ -1,0 +1,1 @@
+# Definizione del codice elaborativo (cv-llm-parser), delle variabili d'ambiente e delle integrazioni a eventi.

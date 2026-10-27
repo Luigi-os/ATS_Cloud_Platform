@@ -1,0 +1,1 @@
+# Definizione della coda di buffering (cv-processing-queue) e della Dead Letter Queue (cv-dlq).

@@ -1,0 +1,1 @@
+# Ruoli e policy di sicurezza per concedere alla Lambda i permessi strettamente necessari.
