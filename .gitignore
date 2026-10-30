@@ -1,1 +1,12 @@
 /Progetto_dir.code-workspace
+
+# Esclusione File di Stato e Directory Locali Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
