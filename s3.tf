@@ -39,6 +39,19 @@ resource "aws_s3_bucket_notification" "incoming_bucket_notification" {
     ]
 }
 
+# Configuration of the S3 bucket CORS (Cross-Origin Resource Sharing) to allow cross-origin requests from any origin.
+resource "aws_s3_bucket_cors_configuration" "incoming_bucket_cors" {
+  bucket = aws_s3_bucket.incoming_bucket.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["PUT", "POST"]
+    allowed_origins = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 # Because the incoming bucket is public, we need to block public access to it. This is made because the project is private.
 resource "aws_s3_bucket_public_access_block" "cv_incoming_public_access_block" {
     bucket = aws_s3_bucket.cv_incoming_bucket.id 

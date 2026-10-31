@@ -26,7 +26,7 @@ resource "aws_lambda_function" "cv_llm_parser" {
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
-  timeout     = 60 # Left the timeout to 60 seconds for testing if the Lambda function can process the CVs in time. 
+  timeout     = 180 # Left the timeout to 180 seconds for testing if the Lambda function can process the CVs in time. 
   memory_size = 256
 
   layers = [

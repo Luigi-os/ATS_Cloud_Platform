@@ -31,5 +31,16 @@ resource "aws_dynamodb_table" "candidates_table" {
         }
         projection_type = "ALL" # Copies all attributes from the table into the index.
     }
+}
 
+# Configuration for the DynamoDB table used to store job information.
+resource "aws_dynamodb_table" "jobs_table" {
+  name         = "${var.project-name}-jobs-table"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "JobID"
+
+  attribute {
+    name = "JobID"
+    type = "S"
+  }
 }
