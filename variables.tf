@@ -20,6 +20,12 @@ variable "region" {
     default     = "eu-north-1"
 }
 
+variable "gemini_api_key" {
+  description = "API Key per l'interazione con Google Gemini"
+  type        = string
+  sensitive   = true
+}
+
 # --------------------------- Local Variables --------------------------- #
 
 # Local variables for resource names.

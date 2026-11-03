@@ -60,6 +60,14 @@ resource "aws_iam_role_policy" "lambda_policy" {
         "Resource": "${aws_dynamodb_table.candidates_table.arn}" # The Lambda function needs to put items into the Candidates DynamoDB table.
         },
         {
+        "Sid": "DynamoDBJobsReadAccess",
+        "Effect": "Allow",
+        "Action": [
+            "dynamodb:GetItem"
+        ],
+        "Resource": "${aws_dynamodb_table.jobs_table.arn}"
+        },
+        {
         "Sid": "CloudWatchLogging", 
         "Effect": "Allow",
         "Action": [

@@ -32,11 +32,13 @@ resource "aws_lambda_function" "cv_llm_parser" {
   layers = [
     aws_lambda_layer_version.python_dependencies.arn
   ]
-
+  # Define environment variables for the Lambda function to access the DynamoDB table and S3 bucket.
   environment {
     variables = {
       DYNAMODB_TABLE = aws_dynamodb_table.candidates_table.name
+      JOBS_TABLE     = aws_dynamodb_table.jobs_table.name
       ARCHIVE_BUCKET = aws_s3_bucket.cv_archive_bucket.bucket
+      GEMINI_API_KEY = var.gemini_api_key
     }
   }
 }

@@ -10,7 +10,7 @@ resource "aws_dynamodb_table" "candidates_table" {
     }
 
     attribute {
-        name = "job_role"
+        name = "job_id"
         type = "S"
     }
 
@@ -20,9 +20,9 @@ resource "aws_dynamodb_table" "candidates_table" {
     }
     # Define a global secondary index (GSI) for querying candidates by job role and score.
     global_secondary_index {
-        name = "JobRoleScoreIndex" 
+        name = "JobIdScoreIndex" 
         key_schema {
-            attribute_name = "job_role"
+            attribute_name = "job_id"
             key_type       = "HASH" # Hash key for the GSI.
         }
         key_schema {
@@ -34,6 +34,7 @@ resource "aws_dynamodb_table" "candidates_table" {
 }
 
 # Configuration for the DynamoDB table used to store job information.
+# Description and JobSkills don't need to be defined as attributes in the table since they are not used for querying. They will be stored as part of the item data.
 resource "aws_dynamodb_table" "jobs_table" {
   name         = "${var.project-name}-jobs-table"
   billing_mode = "PAY_PER_REQUEST"
