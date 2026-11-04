@@ -38,10 +38,10 @@ resource "aws_dynamodb_table" "candidates_table" {
 resource "aws_dynamodb_table" "jobs_table" {
   name         = "${var.project-name}-jobs-table"
   billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "JobID"
+  hash_key     = "job_id"
 
   attribute {
-    name = "JobID"
+    name = "job_id"
     type = "S"
   }
 }

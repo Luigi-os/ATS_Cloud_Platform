@@ -3,8 +3,8 @@
 # S3 bucket for incoming files (cv-incoming-bucket) configuration.
 resource "aws_s3_bucket" "cv_incoming_bucket" {
     
-    bucket = local.bucket_incoming_name # Identificativo univoco del bucket S3. (definito in variables.tf)
-    force_destroy = true # Abilita la rimozione del bucket anche se contiene oggetti. (Per il testing)
+    bucket = local.bucket_incoming_name # Identifier for the S3 bucket. 
+    force_destroy = true # Enable force_destroy to allow the bucket to be deleted even if it contains objects. This is useful for testing environments.
     tags = {
         Name        = "CV Incoming Bucket"
         Environment = var.environment
@@ -26,7 +26,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cv_incoming_encry
 
 # Configuration of the S3 bucket notification to trigger the SQS queue when a new object is created in the incoming bucket.
 resource "aws_s3_bucket_notification" "incoming_bucket_notification" {
-    bucket = aws_s3_bucket.incoming_bucket.id
+    bucket = aws_s3_bucket.cv_incoming_bucket.id
 
     queue {
         queue_arn     = aws_sqs_queue.cv_processing_queue.arn
@@ -41,7 +41,7 @@ resource "aws_s3_bucket_notification" "incoming_bucket_notification" {
 
 # Configuration of the S3 bucket CORS (Cross-Origin Resource Sharing) to allow cross-origin requests from any origin.
 resource "aws_s3_bucket_cors_configuration" "incoming_bucket_cors" {
-  bucket = aws_s3_bucket.incoming_bucket.id
+  bucket = aws_s3_bucket.cv_incoming_bucket.id
 
   cors_rule {
     allowed_headers = ["*"]
