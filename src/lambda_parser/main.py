@@ -3,7 +3,6 @@ import os
 import urllib.parse
 import boto3
 from pypdf import PdfReader
-import docx
 from google import genai
 from google.genai import types
 
@@ -27,9 +26,6 @@ def extract_text(file_path: str, ext: str) -> str:
         reader = PdfReader(file_path)
         # Extract text from each page and join them with newlines, filtering out empty pages.
         return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-    elif ext == '.docx':
-        doc = docx.Document(file_path)
-        return "\n".join([p.text for p in doc.paragraphs if p.text])
     elif ext == '.txt':
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             return f.read()
@@ -72,17 +68,41 @@ def evaluate_candidate(cv_text: str, job_description: str) -> dict:
       "career_evaluation": "Briefly analyze the candidate's past roles, total experience, and professional growth trajectory.",
       "justification": "Explain the exact reason for the assigned score, weighing skills, seniority, and career progression."
     }}
+
+    It's crucial that the response(description) is in Italian.
     """
     
-    response = gemini_client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        )
-    )
-
-    return json.loads(response.text)
+    # Lista di modelli da provare in ordine di priorità
+    fallback_models = [
+        'gemini-3.8-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemini-3.1-pro-preview'
+    ]
+    
+    last_exception = None
+    
+    for model_id in fallback_models:
+        try:
+            print(f"Tentativo di generazione con il modello: {model_id}")
+            response = gemini_client.models.generate_content(
+                model=model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            print(f"Successo! Utilizzato il modello: {model_id}")
+            return json.loads(response.text)
+            
+        except Exception as e:
+            print(f"Fallimento con {model_id}: {str(e)}")
+            last_exception = e
+            continue # Passa automaticamente al modello successivo nella lista
+            
+    # Se il ciclo finisce senza successi, solleva l'ultimo errore riscontrato
+    raise RuntimeError(f"Tutti i modelli di fallback sono falliti. Ultimo errore: {str(last_exception)}")
 
 def lambda_handler(event, context):
     candidates_table = dynamodb.Table(os.environ['CANDIDATES_TABLE'])
@@ -130,7 +150,7 @@ def lambda_handler(event, context):
             path_parts = object_key.split('/')
             job_id = path_parts[1] if len(path_parts) > 1 else "GENERIC"
             
-            job_response = jobs_table.get_item(Key={'Job_id': job_id})
+            job_response = jobs_table.get_item(Key={'job_id': job_id})
             job_desc = job_response.get('Item', {}).get('description', 'Valutazione generica')
 
             # Download the CV file from S3 to the Lambda's temporary storage, extract its text, evaluate it against the job description, and store the results in DynamoDB. 

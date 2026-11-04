@@ -1,36 +1,4 @@
-"""The networks module contains types for common network-related fields.
-
-/// version-added | v2.12
-By default, validation of URL types add a trailing slash if no path is present:
-
-```python
-from pydantic import AnyUrl, BaseModel
-
-class Model(BaseModel):
-    url: AnyUrl
-
-m = Model(url='https://example.com')
-print(m.url)
-#> https://example.com/
-```
-
-The [`url_preserve_empty_path`][pydantic.ConfigDict.url_preserve_empty_path] config option can be used
-to control this behavior:
-
-```python
-from pydantic import AnyUrl, BaseModel, ConfigDict
-
-class Model(BaseModel):
-    model_config = ConfigDict(url_preserve_empty_path=True)
-
-    url: AnyUrl
-
-m = Model(url='https://example.com')
-print(m.url)
-#> https://example.com
-```
-///
-"""
+"""The networks module contains types for common network-related fields."""
 
 from __future__ import annotations as _annotations
 
@@ -40,7 +8,7 @@ from dataclasses import fields
 from functools import lru_cache
 from importlib.metadata import version
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network, IPv6Address, IPv6Interface, IPv6Network
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic_core import (
     MultiHostHost,
@@ -51,7 +19,7 @@ from pydantic_core import (
 )
 from pydantic_core import MultiHostUrl as _CoreMultiHostUrl
 from pydantic_core import Url as _CoreUrl
-from typing_extensions import Self
+from typing_extensions import Annotated, Self, TypeAlias
 
 from pydantic.errors import PydanticUserError
 
@@ -110,7 +78,6 @@ class UrlConstraints:
         default_host: The default host. Defaults to `None`.
         default_port: The default port. Defaults to `None`.
         default_path: The default path. Defaults to `None`.
-        preserve_empty_path: Whether to preserve empty URL paths. Defaults to `None`.
     """
 
     max_length: int | None = None
@@ -119,7 +86,6 @@ class UrlConstraints:
     default_host: str | None = None
     default_port: int | None = None
     default_path: str | None = None
-    preserve_empty_path: bool | None = None
 
     def __hash__(self) -> int:
         return hash(
@@ -130,7 +96,6 @@ class UrlConstraints:
                 self.default_host,
                 self.default_port,
                 self.default_path,
-                self.preserve_empty_path,
             )
         )
 
@@ -146,7 +111,7 @@ class UrlConstraints:
         # because when we generate schemas for urls, we wrap a core_schema.url_schema() with a function-wrap schema
         # that helps with validation on initialization, see _BaseUrl and _BaseMultiHostUrl below.
         schema_to_mutate = schema['schema'] if schema['type'] == 'function-wrap' else schema
-        if (annotated_type := schema_to_mutate['type']) not in ('url', 'multi-host-url'):
+        if annotated_type := schema_to_mutate['type'] not in ('url', 'multi-host-url'):
             raise PydanticUserError(
                 f"'UrlConstraints' cannot annotate '{annotated_type}'.", code='invalid-annotated-type'
             )
@@ -190,7 +155,7 @@ class _BaseUrl:
     def host(self) -> str | None:
         """The host part of the URL, or `None`.
 
-        If the URL must be punycode encoded, this is the encoded host, e.g. if the input URL is `https://£££.com`,
+        If the URL must be punycode encoded, this is the encoded host, e.g if the input URL is `https://£££.com`,
         `host` will be `xn--9aaa.com`
         """
         return self._url.host
@@ -200,7 +165,7 @@ class _BaseUrl:
 
         e.g. `host` in `https://user:pass@host:port/path?query#fragment`
 
-        If the URL must be punycode encoded, this is the decoded host, e.g. if the input URL is `https://£££.com`,
+        If the URL must be punycode encoded, this is the decoded host, e.g if the input URL is `https://£££.com`,
         `unicode_host()` will be `£££.com`
         """
         return self._url.unicode_host()
@@ -247,17 +212,10 @@ class _BaseUrl:
     def unicode_string(self) -> str:
         """The URL as a unicode string, unlike `__str__()` this will not punycode encode the host.
 
-        If the URL must be punycode encoded, this is the decoded string, e.g. if the input URL is `https://£££.com`,
+        If the URL must be punycode encoded, this is the decoded string, e.g if the input URL is `https://£££.com`,
         `unicode_string()` will be `https://£££.com`
         """
         return self._url.unicode_string()
-
-    def encoded_string(self) -> str:
-        """The URL's encoded string representation via __str__().
-
-        This returns the punycode-encoded host version of the URL as a string.
-        """
-        return str(self)
 
     def __str__(self) -> str:
         """The URL as a string, this will punycode encode the host if required."""
@@ -270,29 +228,19 @@ class _BaseUrl:
         return self.__class__(self._url)
 
     def __eq__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url == other._url
+        return self.__class__ is other.__class__ and self._url == other._url
 
     def __lt__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url < other._url
+        return self.__class__ is other.__class__ and self._url < other._url
 
     def __gt__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url > other._url
+        return self.__class__ is other.__class__ and self._url > other._url
 
     def __le__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url <= other._url
+        return self.__class__ is other.__class__ and self._url <= other._url
 
     def __ge__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url >= other._url
+        return self.__class__ is other.__class__ and self._url >= other._url
 
     def __hash__(self) -> int:
         return hash(self._url)
@@ -419,7 +367,7 @@ class _BaseMultiHostUrl:
     def query_params(self) -> list[tuple[str, str]]:
         """The query part of the URL as a list of key-value pairs.
 
-        e.g. `[('foo', 'bar')]` in `https://foo.com,bar.com/path?foo=bar#fragment`
+        e.g. `[('foo', 'bar')]` in `https://foo.com,bar.com/path?query#fragment`
         """
         return self._url.query_params()
 
@@ -450,13 +398,6 @@ class _BaseMultiHostUrl:
         '''
         return self._url.hosts()
 
-    def encoded_string(self) -> str:
-        """The URL's encoded string representation via __str__().
-
-        This returns the punycode-encoded host version of the URL as a string.
-        """
-        return str(self)
-
     def unicode_string(self) -> str:
         """The URL as a unicode string, unlike `__str__()` this will not punycode encode the hosts."""
         return self._url.unicode_string()
@@ -472,9 +413,7 @@ class _BaseMultiHostUrl:
         return self.__class__(self._url)
 
     def __eq__(self, other: Any) -> bool:
-        if self.__class__ is not other.__class__:
-            return NotImplemented
-        return self._url == other._url
+        return self.__class__ is other.__class__ and self._url == other._url
 
     def __hash__(self) -> int:
         return hash(self._url)
@@ -482,36 +421,6 @@ class _BaseMultiHostUrl:
     def __len__(self) -> int:
         return len(str(self._url))
 
-    @classmethod
-    @overload
-    def build(
-        cls,
-        *,
-        scheme: str,
-        hosts: list[MultiHostHost],
-        username: None = None,
-        password: None = None,
-        host: None = None,
-        port: None = None,
-        path: str | None = None,
-        query: str | None = None,
-        fragment: str | None = None,
-    ) -> Self: ...
-    @classmethod
-    @overload
-    def build(
-        cls,
-        *,
-        scheme: str,
-        hosts: None = None,
-        host: str,
-        username: str | None = None,
-        password: str | None = None,
-        port: int | None = None,
-        path: str | None = None,
-        query: str | None = None,
-        fragment: str | None = None,
-    ) -> Self: ...
     @classmethod
     def build(
         cls,
@@ -546,12 +455,12 @@ class _BaseMultiHostUrl:
             An instance of `MultiHostUrl`
         """
         return cls(
-            _CoreMultiHostUrl.build(  # pyright: ignore[reportCallIssue]
+            _CoreMultiHostUrl.build(
                 scheme=scheme,
-                hosts=hosts,  # pyright: ignore[reportArgumentType]
+                hosts=hosts,
                 username=username,
                 password=password,
-                host=host,  # pyright: ignore[reportArgumentType]
+                host=host,
                 port=port,
                 path=path,
                 query=query,
@@ -908,23 +817,6 @@ class MongoDsn(_BaseMultiHostUrl):
     * Database name not required
     * Port not required
     * User info may be passed without user part (e.g., `mongodb://mongodb0.example.com:27017`).
-
-    !!! warning
-        If a port isn't specified, the default MongoDB port `27017` will be used. If this behavior is
-        undesirable, you can use the following:
-
-        ```python
-        from typing import Annotated
-
-        from pydantic_core import MultiHostUrl
-
-        from pydantic import UrlConstraints
-
-        MongoDsnNoDefaultPort = Annotated[
-            MultiHostUrl,
-            UrlConstraints(allowed_schemes=['mongodb', 'mongodb+srv']),
-        ]
-        ```
     """
 
     _constraints = UrlConstraints(allowed_schemes=['mongodb', 'mongodb+srv'], default_port=27017)
@@ -1002,14 +894,7 @@ class ClickHouseDsn(AnyUrl):
     """
 
     _constraints = UrlConstraints(
-        allowed_schemes=[
-            'clickhouse+native',
-            'clickhouse+asynch',
-            'clickhouse+http',
-            'clickhouse',
-            'clickhouses',
-            'clickhousedb',
-        ],
+        allowed_schemes=['clickhouse+native', 'clickhouse+asynch'],
         default_host='localhost',
         default_port=9000,
     )
@@ -1039,7 +924,7 @@ def import_email_validator() -> None:
     try:
         import email_validator
     except ImportError as e:
-        raise ImportError("email-validator is not installed, run `pip install 'pydantic[email]'`") from e
+        raise ImportError('email-validator is not installed, run `pip install pydantic[email]`') from e
     if not version('email-validator').partition('.')[0] == '2':
         raise ImportError('email-validator version >= 2.0 required, run pip install -U email-validator')
 
@@ -1340,7 +1225,7 @@ else:
 
 
 def _build_pretty_email_regex() -> re.Pattern[str]:
-    name_chars = r'[\w.!#$%&\'*+\-/=?^_`{|}~]'
+    name_chars = r'[\w!#$%&\'*+\-/=?^_`{|}~]'
     unquoted_name_group = rf'((?:{name_chars}+\s+)*{name_chars}+)'
     quoted_name_group = r'"((?:[^"]|\")+)"'
     email_group = r'<(.+)>'
@@ -1380,17 +1265,6 @@ def validate_email(value: str) -> tuple[str, str]:
             'value_error',
             'value is not a valid email address: {reason}',
             {'reason': f'Length must not exceed {MAX_EMAIL_LENGTH} characters'},
-        )
-
-    # Carriage returns and line feeds are only allowed in a header field body as part of "folding"
-    # (a CRLF immediately followed by whitespace), which is unfolded before the value is parsed
-    # (see https://www.rfc-editor.org/info/rfc5322/#section-2.2). A `NameEmail` is a standalone value
-    # rather than a folded header line, so any CR or LF is rejected.
-    if '\r' in value or '\n' in value:
-        raise PydanticCustomError(
-            'value_error',
-            'value is not a valid email address: {reason}',
-            {'reason': 'Carriage return and line feed characters are not allowed'},
         )
 
     m = pretty_email_regex.fullmatch(value)

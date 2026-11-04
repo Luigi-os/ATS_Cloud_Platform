@@ -49,3 +49,8 @@ output "lambda_function_arn" {
   description = "ARN della funzione Lambda."
   value       = aws_lambda_function.cv_llm_parser.arn
 }
+
+output "api_endpoint" {
+  value       = aws_apigatewayv2_api.http_api.api_endpoint
+  description = "URL base dell'API Gateway da inserire nel frontend"
+}

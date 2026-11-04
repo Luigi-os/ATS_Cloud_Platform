@@ -15,9 +15,7 @@
 
 """Google Gen AI SDK"""
 
-import importlib
-from typing import Any
-
+from . import interactions
 from . import types
 from . import version
 from .client import Client
@@ -25,29 +23,4 @@ from .client import Client
 
 __version__ = version.__version__
 
-__all__ = [
-    'Client',
-    'agents',
-    'credentials',
-    'environments',
-    'interactions',
-    'triggers',
-    'types',
-    'voices',
-    'webhooks',
-]
-
-
-def __getattr__(name: str) -> Any:
-  if name in {
-      'agents',
-      'credentials',
-      'environments',
-      'interactions',
-      'triggers',
-      'webhooks',
-  }:
-    module = importlib.import_module(f'.{name}', __name__)
-    globals()[name] = module
-    return module
-  raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+__all__ = ['Client']

@@ -2,7 +2,7 @@
 
 from __future__ import annotations as _annotations
 
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, Union
 
 from pydantic_core import core_schema
 
@@ -10,14 +10,13 @@ if TYPE_CHECKING:
     from ._internal._namespace_utils import NamespacesTuple
     from .json_schema import JsonSchemaMode, JsonSchemaValue
 
-    CoreSchemaOrField: TypeAlias = (
-        core_schema.CoreSchema
-        | core_schema.ModelField
-        | core_schema.DataclassField
-        | core_schema.TypedDictField
-        | core_schema.ComputedField
-    )
-
+    CoreSchemaOrField = Union[
+        core_schema.CoreSchema,
+        core_schema.ModelField,
+        core_schema.DataclassField,
+        core_schema.TypedDictField,
+        core_schema.ComputedField,
+    ]
 
 __all__ = 'GetJsonSchemaHandler', 'GetCoreSchemaHandler'
 

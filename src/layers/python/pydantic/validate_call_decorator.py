@@ -3,10 +3,9 @@
 from __future__ import annotations as _annotations
 
 import inspect
-from collections.abc import Callable
 from functools import partial
 from types import BuiltinFunctionType
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast, overload
 
 from ._internal import _generate_schema, _typing_extra, _validate_call
 from .errors import PydanticUserError
@@ -26,8 +25,8 @@ def _check_function_type(function: object) -> None:
     """Check if the input function is a supported type for `validate_call`."""
     if isinstance(function, _generate_schema.VALIDATE_CALL_SUPPORTED_TYPES):
         try:
-            _typing_extra.signature_no_eval(cast(_generate_schema.ValidateCallSupportedTypes, function))
-        except (ValueError, TypeError):
+            inspect.signature(cast(_generate_schema.ValidateCallSupportedTypes, function))
+        except ValueError:
             raise PydanticUserError(
                 f"Input function `{function}` doesn't have a valid signature", code=_INVALID_TYPE_ERROR_CODE
             )
@@ -87,19 +86,14 @@ def validate_call(
     config: ConfigDict | None = None,
     validate_return: bool = False,
 ) -> AnyCallableT | Callable[[AnyCallableT], AnyCallableT]:
-    """!!! abstract "Usage Documentation"
-        [Validation Decorator](../concepts/validation_decorator.md)
+    """Usage docs: https://docs.pydantic.dev/2.10/concepts/validation_decorator/
 
-    Returns a wrapper around the function that validates the arguments and, optionally, the return value.
+    Returns a decorated wrapper around the function that validates the arguments and, optionally, the return value.
 
-    Usage may be either as a plain decorator `@validate_call` or with arguments (`@validate_call(...)`).
-
-    When a decorated call fails, the [`ValidationError`][pydantic_core.ValidationError] reports the
-    rejected argument and value. [Logfire](../integrations/logfire.md) can retain the complete call input
-    and surrounding trace context — see [Troubleshooting validation errors](../errors/troubleshooting.md).
+    Usage may be either as a plain decorator `@validate_call` or with arguments `@validate_call(...)`.
 
     Args:
-        func: The function to be wrapped.
+        func: The function to be decorated.
         config: The configuration dictionary.
         validate_return: Whether to validate the return value.
 

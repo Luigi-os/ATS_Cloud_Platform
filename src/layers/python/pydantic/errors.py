@@ -2,12 +2,9 @@
 
 from __future__ import annotations as _annotations
 
-from typing import Any, ClassVar, Literal
+import re
 
-from typing_extensions import Self
-from typing_inspection.introspection import Qualifier
-
-from pydantic._internal import _repr
+from typing_extensions import Literal, Self
 
 from ._migration import getattr_migration
 from .version import version_short
@@ -18,7 +15,6 @@ __all__ = (
     'PydanticImportError',
     'PydanticSchemaGenerationError',
     'PydanticInvalidForJsonSchema',
-    'PydanticForbiddenQualifier',
     'PydanticErrorCodes',
 )
 
@@ -29,8 +25,6 @@ DEV_ERROR_DOCS_URL = f'https://errors.pydantic.dev/{version_short()}/u/'
 PydanticErrorCodes = Literal[
     'class-not-fully-defined',
     'custom-json-schema',
-    'decorator-invalid-fields',
-    'decorator-missing-arguments',
     'decorator-missing-field',
     'discriminator-no-field',
     'discriminator-alias-type',
@@ -51,7 +45,9 @@ PydanticErrorCodes = Literal[
     'schema-for-unknown-type',
     'import-error',
     'create-model-field-definitions',
-    'create-model-namespace',
+    'create-model-config-base',
+    'validator-no-fields',
+    'validator-invalid-fields',
     'validator-instance-method',
     'validator-input-type',
     'root-validator-pre-skip',
@@ -75,7 +71,6 @@ PydanticErrorCodes = Literal[
     'unpack-typed-dict',
     'overlapping-unpack-typed-dict',
     'invalid-self-type',
-    'validate-by-alias-and-name-false',
 ]
 
 
@@ -98,7 +93,7 @@ class PydanticErrorMixin:
             return f'{self.message}\n\nFor further information visit {DEV_ERROR_DOCS_URL}{self.code}'
 
 
-class PydanticUserError(PydanticErrorMixin, RuntimeError):
+class PydanticUserError(PydanticErrorMixin, TypeError):
     """An error raised due to incorrect use of Pydantic."""
 
 
@@ -106,11 +101,11 @@ class PydanticUndefinedAnnotation(PydanticErrorMixin, NameError):
     """A subclass of `NameError` raised when handling undefined annotations during `CoreSchema` generation.
 
     Attributes:
-        name: Name of the error, of `None` if not available.
+        name: Name of the error.
         message: Description of the error.
     """
 
-    def __init__(self, name: str | None, message: str) -> None:
+    def __init__(self, name: str, message: str) -> None:
         self.name = name
         super().__init__(message=message, code='undefined-annotation')
 
@@ -124,7 +119,11 @@ class PydanticUndefinedAnnotation(PydanticErrorMixin, NameError):
         Returns:
             Converted `PydanticUndefinedAnnotation` error.
         """
-        return cls(name=name_error.name, message=str(name_error))
+        try:
+            name = name_error.name  # type: ignore  # python > 3.10
+        except AttributeError:
+            name = re.search(r".*'(.+?)'", str(name_error)).group(1)  # type: ignore[union-attr]
+        return cls(name=name, message=str(name_error))
 
 
 class PydanticImportError(PydanticErrorMixin, ImportError):
@@ -158,28 +157,6 @@ class PydanticInvalidForJsonSchema(PydanticUserError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message, code='invalid-for-json-schema')
-
-
-class PydanticForbiddenQualifier(PydanticUserError):
-    """An error raised if a forbidden type qualifier is found in a type annotation."""
-
-    _qualifier_repr_map: ClassVar[dict[Qualifier, str]] = {
-        'required': 'typing.Required',
-        'not_required': 'typing.NotRequired',
-        'read_only': 'typing.ReadOnly',
-        'class_var': 'typing.ClassVar',
-        'init_var': 'dataclasses.InitVar',
-        'final': 'typing.Final',
-    }
-
-    def __init__(self, qualifier: Qualifier, annotation: Any) -> None:
-        super().__init__(
-            message=(
-                f'The annotation {_repr.display_as_type(annotation)!r} contains the {self._qualifier_repr_map[qualifier]!r} '
-                f'type qualifier, which is invalid in the context it is defined.'
-            ),
-            code=None,
-        )
 
 
 __getattr__ = getattr_migration(__name__)

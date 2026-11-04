@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import sys
 import textwrap
 from typing import Any
 
@@ -37,16 +36,6 @@ class DocstringVisitor(ast.NodeVisitor):
                 self.attrs[self.target] = docstring
             self.target = None
 
-    # Don't look into nested classes and functions, as their attributes don't belong to the inspected class:
-    def visit_ClassDef(self, node: ast.ClassDef) -> Any:
-        pass
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
-        pass
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
-        pass
-
 
 def _dedent_source_lines(source: list[str]) -> str:
     # Required for nested class definitions, e.g. in a function block
@@ -67,7 +56,7 @@ def _extract_source_from_frame(cls: type[Any]) -> list[str] | None:
             lnum = frame.f_lineno
             try:
                 lines, _ = inspect.findsource(frame)
-            except OSError:  # pragma: no cover
+            except OSError:
                 # Source can't be retrieved (maybe because running in an interactive terminal),
                 # we don't want to error here.
                 pass
@@ -100,17 +89,13 @@ def extract_docstrings_from_cls(cls: type[Any], use_inspect: bool = False) -> di
     Returns:
         A mapping containing attribute names and their corresponding docstring.
     """
-    if use_inspect or sys.version_info >= (3, 13):
-        # On Python < 3.13, `inspect.getsourcelines()` might not work as expected
-        # if two classes have the same name in the same source file.
-        # On Python 3.13+, it will use the new `__firstlineno__` class attribute,
-        # making it way more robust.
+    if use_inspect:
+        # Might not work as expected if two classes have the same name in the same source file.
         try:
             source, _ = inspect.getsourcelines(cls)
-        except (OSError, TypeError):  # pragma: no cover
+        except OSError:
             return {}
     else:
-        # TODO remove this implementation when we drop support for Python 3.12:
         source = _extract_source_from_frame(cls)
 
     if not source:
@@ -118,11 +103,6 @@ def extract_docstrings_from_cls(cls: type[Any], use_inspect: bool = False) -> di
 
     dedent_source = _dedent_source_lines(source)
 
-    stmt = ast.parse(dedent_source).body[0]
-    if isinstance(stmt, ast.FunctionDef) and stmt.name == 'dedent_workaround':
-        # `_dedent_source_lines()` wrapped the class around the workaround function
-        stmt = stmt.body[0]
-
     visitor = DocstringVisitor()
-    visitor.generic_visit(stmt)
+    visitor.visit(ast.parse(dedent_source))
     return visitor.attrs

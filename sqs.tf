@@ -27,8 +27,8 @@ resource "aws_sqs_queue_redrive_policy" "processing_queue_redrive_policy" {
 }
 
 # Configure the SQS queue policy to allow the S3 bucket to send messages to the processing queue when new objects are created in the incoming bucket.
-resource "aws_sqs_queue_policy" "cv_processing_queue_policy" {
-    queue_url = aws_sqs_queue.cv_processing_queue.id
+resource "aws_sqs_queue_policy" "processing_queue_policy" {
+    queue_url = aws_sqs_queue.processing_queue.id
 
     policy = jsonencode({
         Version = "2012-10-17"
@@ -40,11 +40,11 @@ resource "aws_sqs_queue_policy" "cv_processing_queue_policy" {
             Service = "s3.amazonaws.com"
             }
             Action   = "sqs:SendMessage"
-            Resource = aws_sqs_queue.cv_processing_queue.arn
+            Resource = aws_sqs_queue.processing_queue.arn
             # Add a condition to allow only the specific S3 bucket to send messages to the SQS queue.
             Condition = {
                 ArnEquals = {
-                    "aws:SourceArn" = aws_s3_bucket.incoming_bucket.arn
+                    "aws:SourceArn" = aws_s3_bucket.cv_incoming_bucket.arn
                 }
             }
         }

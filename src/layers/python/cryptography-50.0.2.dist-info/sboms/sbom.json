@@ -2,9 +2,9 @@
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
   "version": 1,
-  "serialNumber": "urn:uuid:c6073d07-748d-4073-86b8-34a732cbb0a6",
+  "serialNumber": "urn:uuid:35b8e6a6-cfae-49c8-b5ac-f76301fe84af",
   "metadata": {
-    "timestamp": "2026-09-29T23:03:05Z"
+    "timestamp": "2026-09-29T23:03:51Z"
   },
   "components": [
     {
@@ -27,11 +27,11 @@
       "properties": [
         {
           "name": "build:operating-system",
-          "value": "macos"
+          "value": "linux"
         },
         {
           "name": "build:architecture",
-          "value": "arm64"
+          "value": "x86_64"
         },
         {
           "name": "build:flags",

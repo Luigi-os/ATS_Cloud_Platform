@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
 from functools import partial, partialmethod
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, overload
 
 from pydantic_core import PydanticUndefined, core_schema
 from pydantic_core.core_schema import SerializationInfo, SerializerFunctionWrapHandler, WhenUsed
-from typing_extensions import TypeForm
+from typing_extensions import Annotated, Literal, TypeAlias
 
 from . import PydanticUndefinedAnnotation
-from ._internal import _decorators
+from ._internal import _decorators, _internal_dataclass
 from .annotated_handlers import GetCoreSchemaHandler
-from .errors import PydanticUserError
 
 
-@dataclasses.dataclass(slots=True, frozen=True)
+@dataclasses.dataclass(**_internal_dataclass.slots_true, frozen=True)
 class PlainSerializer:
     """Plain serializers use a function to modify the output of serialization.
 
@@ -25,12 +23,14 @@ class PlainSerializer:
     Consider an input of `list`, which will be serialized into a space-delimited string.
 
     ```python
-    from typing import Annotated
+    from typing import List
+
+    from typing_extensions import Annotated
 
     from pydantic import BaseModel, PlainSerializer
 
     CustomStr = Annotated[
-        list, PlainSerializer(lambda x: ' '.join(x), return_type=str)
+        List, PlainSerializer(lambda x: ' '.join(x), return_type=str)
     ]
 
     class StudentModel(BaseModel):
@@ -49,7 +49,7 @@ class PlainSerializer:
     """
 
     func: core_schema.SerializerFunction
-    return_type: TypeForm[Any] = PydanticUndefined  # pyright: ignore[reportAssignmentType]
+    return_type: Any = PydanticUndefined
     when_used: WhenUsed = 'always'
 
     def __get_pydantic_core_schema__(self, source_type: Any, handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
@@ -63,20 +63,17 @@ class PlainSerializer:
             The Pydantic core schema.
         """
         schema = handler(source_type)
-        if self.return_type is not PydanticUndefined:
-            return_type = self.return_type
-        else:
-            try:
-                # Do not pass in globals as the function could be defined in a different module.
-                # Instead, let `get_callable_return_type` infer the globals to use, but still pass
-                # in locals that may contain a parent/rebuild namespace:
-                return_type = _decorators.get_callable_return_type(
-                    self.func,
-                    localns=handler._get_types_namespace().locals,
-                )
-            except NameError as e:
-                raise PydanticUndefinedAnnotation.from_name_error(e) from e
-
+        try:
+            # Do not pass in globals as the function could be defined in a different module.
+            # Instead, let `get_function_return_type` infer the globals to use, but still pass
+            # in locals that may contain a parent/rebuild namespace:
+            return_type = _decorators.get_function_return_type(
+                self.func,
+                self.return_type,
+                localns=handler._get_types_namespace().locals,
+            )
+        except NameError as e:
+            raise PydanticUndefinedAnnotation.from_name_error(e) from e
         return_schema = None if return_type is PydanticUndefined else handler.generate_schema(return_type)
         schema['serialization'] = core_schema.plain_serializer_function_ser_schema(
             function=self.func,
@@ -87,7 +84,7 @@ class PlainSerializer:
         return schema
 
 
-@dataclasses.dataclass(slots=True, frozen=True)
+@dataclasses.dataclass(**_internal_dataclass.slots_true, frozen=True)
 class WrapSerializer:
     """Wrap serializers receive the raw inputs along with a handler function that applies the standard serialization
     logic, and can modify the resulting value before returning it as the final output of serialization.
@@ -96,43 +93,54 @@ class WrapSerializer:
 
     ```python
     from datetime import datetime, timezone
-    from typing import Annotated, Any
+    from typing import Any, Dict
 
-    from pydantic import (
-        BaseModel,
-        SerializationInfo,
-        SerializerFunctionWrapHandler,
-        WrapSerializer,
-    )
+    from typing_extensions import Annotated
 
-    def convert_to_utc(
-        value: Any, handler: SerializerFunctionWrapHandler, info: SerializationInfo
-    ):
+    from pydantic import BaseModel, WrapSerializer
+
+    class EventDatetime(BaseModel):
+        start: datetime
+        end: datetime
+
+    def convert_to_utc(value: Any, handler, info) -> Dict[str, datetime]:
         # Note that `handler` can actually help serialize the `value` for
         # further custom serialization in case it's a subclass.
-        serialized = handler(value)
+        partial_result = handler(value, info)
         if info.mode == 'json':
-            return datetime.fromisoformat(serialized).astimezone(timezone.utc)
-        else:
-            return serialized.astimezone(timezone.utc)
+            return {
+                k: datetime.fromisoformat(v).astimezone(timezone.utc)
+                for k, v in partial_result.items()
+            }
+        return {k: v.astimezone(timezone.utc) for k, v in partial_result.items()}
 
-    UTCDatetime = Annotated[datetime, WrapSerializer(convert_to_utc)]
+    UTCEventDatetime = Annotated[EventDatetime, WrapSerializer(convert_to_utc)]
 
     class EventModel(BaseModel):
-        event_datetime: UTCDatetime
+        event_datetime: UTCEventDatetime
 
-    event = EventModel(event_datetime='2024-01-01T07:00:00-08:00')
+    dt = EventDatetime(
+        start='2024-01-01T07:00:00-08:00', end='2024-01-03T20:00:00+06:00'
+    )
+    event = EventModel(event_datetime=dt)
     print(event.model_dump())
     '''
     {
-        'event_datetime': datetime.datetime(
-            2024, 1, 1, 15, 0, tzinfo=datetime.timezone.utc
-        )
+        'event_datetime': {
+            'start': datetime.datetime(
+                2024, 1, 1, 15, 0, tzinfo=datetime.timezone.utc
+            ),
+            'end': datetime.datetime(
+                2024, 1, 3, 14, 0, tzinfo=datetime.timezone.utc
+            ),
+        }
     }
     '''
 
     print(event.model_dump_json())
-    #> {"event_datetime":"2024-01-01T15:00:00Z"}
+    '''
+    {"event_datetime":{"start":"2024-01-01T15:00:00Z","end":"2024-01-03T14:00:00Z"}}
+    '''
     ```
 
     Attributes:
@@ -143,7 +151,7 @@ class WrapSerializer:
     """
 
     func: core_schema.WrapSerializerFunction
-    return_type: TypeForm[Any] = PydanticUndefined  # pyright: ignore[reportAssignmentType]
+    return_type: Any = PydanticUndefined
     when_used: WhenUsed = 'always'
 
     def __get_pydantic_core_schema__(self, source_type: Any, handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
@@ -157,20 +165,18 @@ class WrapSerializer:
             The generated core schema of the class.
         """
         schema = handler(source_type)
-        if self.return_type is not PydanticUndefined:
-            return_type = self.return_type
-        else:
-            try:
-                # Do not pass in globals as the function could be defined in a different module.
-                # Instead, let `get_callable_return_type` infer the globals to use, but still pass
-                # in locals that may contain a parent/rebuild namespace:
-                return_type = _decorators.get_callable_return_type(
-                    self.func,
-                    localns=handler._get_types_namespace().locals,
-                )
-            except NameError as e:
-                raise PydanticUndefinedAnnotation.from_name_error(e) from e
-
+        globalns, localns = handler._get_types_namespace()
+        try:
+            # Do not pass in globals as the function could be defined in a different module.
+            # Instead, let `get_function_return_type` infer the globals to use, but still pass
+            # in locals that may contain a parent/rebuild namespace:
+            return_type = _decorators.get_function_return_type(
+                self.func,
+                self.return_type,
+                localns=handler._get_types_namespace().locals,
+            )
+        except NameError as e:
+            raise PydanticUndefinedAnnotation.from_name_error(e) from e
         return_schema = None if return_type is PydanticUndefined else handler.generate_schema(return_type)
         schema['serialization'] = core_schema.wrap_serializer_function_ser_schema(
             function=self.func,
@@ -203,7 +209,7 @@ def field_serializer(
     /,
     *fields: str,
     mode: Literal['wrap'],
-    return_type: TypeForm[Any] = ...,
+    return_type: Any = ...,
     when_used: WhenUsed = ...,
     check_fields: bool | None = ...,
 ) -> Callable[[_FieldWrapSerializerT], _FieldWrapSerializerT]: ...
@@ -215,18 +221,16 @@ def field_serializer(
     /,
     *fields: str,
     mode: Literal['plain'] = ...,
-    return_type: TypeForm[Any] = ...,
+    return_type: Any = ...,
     when_used: WhenUsed = ...,
     check_fields: bool | None = ...,
 ) -> Callable[[_FieldPlainSerializerT], _FieldPlainSerializerT]: ...
 
 
-def field_serializer(  # noqa: D417
-    field: str,
-    /,
+def field_serializer(
     *fields: str,
     mode: Literal['plain', 'wrap'] = 'plain',
-    return_type: TypeForm[Any] = PydanticUndefined,  # pyright: ignore[reportArgumentType]
+    return_type: Any = PydanticUndefined,
     when_used: WhenUsed = 'always',
     check_fields: bool | None = None,
 ) -> (
@@ -238,14 +242,16 @@ def field_serializer(  # noqa: D417
     In the below example, a field of type `set` is used to mitigate duplication. A `field_serializer` is used to serialize the data as a sorted list.
 
     ```python
+    from typing import Set
+
     from pydantic import BaseModel, field_serializer
 
     class StudentModel(BaseModel):
         name: str = 'Jane'
-        courses: set[str]
+        courses: Set[str]
 
         @field_serializer('courses', when_used='json')
-        def serialize_courses_in_order(self, courses: set[str]):
+        def serialize_courses_in_order(self, courses: Set[str]):
             return sorted(courses)
 
     student = StudentModel(courses={'Math', 'Chemistry', 'English'})
@@ -253,9 +259,9 @@ def field_serializer(  # noqa: D417
     #> {"name":"Jane","courses":["Chemistry","English","Math"]}
     ```
 
-    See [the usage documentation](../concepts/serialization.md#serializers) for more information.
+    See [Custom serializers](../concepts/serialization.md#custom-serializers) for more information.
 
-    Four signatures are supported for the decorated serializer:
+    Four signatures are supported:
 
     - `(self, value: Any, info: FieldSerializationInfo)`
     - `(self, value: Any, nxt: SerializerFunctionWrapHandler, info: FieldSerializationInfo)`
@@ -263,7 +269,7 @@ def field_serializer(  # noqa: D417
     - `(value: Any, nxt: SerializerFunctionWrapHandler, info: SerializationInfo)`
 
     Args:
-        *fields: The field names the serializer should apply to.
+        fields: Which field(s) the method should be called on.
         mode: The serialization mode.
 
             - `plain` means the function will be called instead of the default serialization logic,
@@ -273,25 +279,9 @@ def field_serializer(  # noqa: D417
         when_used: Determines the serializer will be used for serialization.
         check_fields: Whether to check that the fields actually exist on the model.
 
-    Raises:
-        PydanticUserError:
-            - If the decorator is used without any arguments (at least one field name must be provided).
-            - If the provided field names are not strings.
+    Returns:
+        The decorator function.
     """
-    if callable(field) or isinstance(field, classmethod):
-        raise PydanticUserError(
-            'The `@field_serializer` decorator cannot be used without arguments, at least one field must be provided. '
-            "For example: `@field_serializer('<field_name>', ...)`.",
-            code='decorator-missing-arguments',
-        )
-
-    fields = field, *fields
-    if not all(isinstance(field, str) for field in fields):
-        raise PydanticUserError(
-            'The provided field names to the `@field_serializer` decorator should be strings. '
-            "For example: `@field_serializer('<field_name_1>', '<field_name_2>', ...).`",
-            code='decorator-invalid-fields',
-        )
 
     def dec(f: FieldSerializer) -> _decorators.PydanticDescriptorProxy[Any]:
         dec_info = _decorators.FieldSerializerDecoratorInfo(
@@ -309,7 +299,7 @@ def field_serializer(  # noqa: D417
 if TYPE_CHECKING:
     # The first argument in the following callables represent the `self` type:
 
-    ModelPlainSerializerWithInfo: TypeAlias = Callable[[Any, SerializationInfo[Any]], Any]
+    ModelPlainSerializerWithInfo: TypeAlias = Callable[[Any, SerializationInfo], Any]
     """A model serializer method with the `info` argument, in `plain` mode."""
 
     ModelPlainSerializerWithoutInfo: TypeAlias = Callable[[Any], Any]
@@ -318,7 +308,7 @@ if TYPE_CHECKING:
     ModelPlainSerializer: TypeAlias = 'ModelPlainSerializerWithInfo | ModelPlainSerializerWithoutInfo'
     """A model serializer method in `plain` mode."""
 
-    ModelWrapSerializerWithInfo: TypeAlias = Callable[[Any, SerializerFunctionWrapHandler, SerializationInfo[Any]], Any]
+    ModelWrapSerializerWithInfo: TypeAlias = Callable[[Any, SerializerFunctionWrapHandler, SerializationInfo], Any]
     """A model serializer method with the `info` argument, in `wrap` mode."""
 
     ModelWrapSerializerWithoutInfo: TypeAlias = Callable[[Any, SerializerFunctionWrapHandler], Any]
@@ -339,7 +329,7 @@ def model_serializer(f: _ModelPlainSerializerT, /) -> _ModelPlainSerializerT: ..
 
 @overload
 def model_serializer(
-    *, mode: Literal['wrap'], when_used: WhenUsed = 'always', return_type: TypeForm[Any] = ...
+    *, mode: Literal['wrap'], when_used: WhenUsed = 'always', return_type: Any = ...
 ) -> Callable[[_ModelWrapSerializerT], _ModelWrapSerializerT]: ...
 
 
@@ -348,17 +338,17 @@ def model_serializer(
     *,
     mode: Literal['plain'] = ...,
     when_used: WhenUsed = 'always',
-    return_type: TypeForm[Any] = ...,
+    return_type: Any = ...,
 ) -> Callable[[_ModelPlainSerializerT], _ModelPlainSerializerT]: ...
 
 
-def model_serializer(  # pyright: ignore[reportInconsistentOverload]
+def model_serializer(
     f: _ModelPlainSerializerT | _ModelWrapSerializerT | None = None,
     /,
     *,
     mode: Literal['plain', 'wrap'] = 'plain',
     when_used: WhenUsed = 'always',
-    return_type: TypeForm[Any] = PydanticUndefined,  # pyright: ignore[reportArgumentType]
+    return_type: Any = PydanticUndefined,
 ) -> (
     _ModelPlainSerializerT
     | Callable[[_ModelWrapSerializerT], _ModelWrapSerializerT]
@@ -400,7 +390,7 @@ def model_serializer(  # pyright: ignore[reportInconsistentOverload]
     - `(self, nxt: SerializerFunctionWrapHandler)`
     - `(self, nxt: SerializerFunctionWrapHandler, info: SerializationInfo)`
 
-        See [the usage documentation](../concepts/serialization.md#serializers) for more information.
+        See [Custom serializers](../concepts/serialization.md#custom-serializers) for more information.
 
     Args:
         f: The function to be decorated.
@@ -431,19 +421,15 @@ AnyType = TypeVar('AnyType')
 
 if TYPE_CHECKING:
     SerializeAsAny = Annotated[AnyType, ...]  # SerializeAsAny[list[str]] will be treated by type checkers as list[str]
-    """Annotation used to mark a type as having duck-typing serialization behavior.
-
-    See [usage documentation](../concepts/serialization.md#serializing-with-duck-typing) for more details.
+    """Force serialization to ignore whatever is defined in the schema and instead ask the object
+    itself how it should be serialized.
+    In particular, this means that when model subclasses are serialized, fields present in the subclass
+    but not in the original schema will be included.
     """
 else:
 
-    @dataclasses.dataclass(slots=True)
-    class SerializeAsAny:
-        """Annotation used to mark a type as having duck-typing serialization behavior.
-
-        See [usage documentation](../concepts/serialization.md#serializing-with-duck-typing) for more details.
-        """
-
+    @dataclasses.dataclass(**_internal_dataclass.slots_true)
+    class SerializeAsAny:  # noqa: D101
         def __class_getitem__(cls, item: Any) -> Any:
             return Annotated[item, SerializeAsAny()]
 
@@ -455,7 +441,9 @@ else:
             while schema_to_update['type'] == 'definitions':
                 schema_to_update = schema_to_update.copy()
                 schema_to_update = schema_to_update['schema']
-            schema_to_update['serialization'] = core_schema.simple_ser_schema('any')
+            schema_to_update['serialization'] = core_schema.wrap_serializer_function_ser_schema(
+                lambda x, h: h(x), schema=core_schema.any_schema()
+            )
             return schema
 
         __hash__ = object.__hash__

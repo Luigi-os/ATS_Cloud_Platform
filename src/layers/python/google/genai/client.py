@@ -13,17 +13,13 @@
 # limitations under the License.
 #
 
-from __future__ import annotations
-
 import asyncio
 import os
-from typing import Any, Optional, TYPE_CHECKING, Union
-import warnings
+from typing import Any, Optional, Union
 
 import google.auth
 import pydantic
 
-from . import _common
 from ._api_client import BaseApiClient
 from ._base_url import get_base_url
 from ._replay_api_client import ReplayApiClient
@@ -39,30 +35,73 @@ from .tokens import AsyncTokens, Tokens
 from .tunings import AsyncTunings, Tunings
 from .types import HttpOptions, HttpOptionsDict, HttpRetryOptions
 
-if TYPE_CHECKING:
-  from ._gaos.google_genai import (
-      AsyncGeminiNextGenAgents,
-      AsyncGeminiNextGenCredentials,
-      AsyncGeminiNextGenEnvironments,
-      AsyncGeminiNextGenInteractions,
-      AsyncGeminiNextGenTriggers,
-      AsyncGeminiNextGenVoices,
-      AsyncGeminiNextGenWebhooks,
-      GeminiNextGenAgents,
-      GeminiNextGenCredentials,
-      GeminiNextGenEnvironments,
-      GeminiNextGenInteractions,
-      GeminiNextGenTriggers,
-      GeminiNextGenVoices,
-      GeminiNextGenWebhooks,
-  )
-  from ._gaos.sdk import AsyncGenAI as AsyncGeminiNextGenAPI
-  from ._gaos.sdk import GenAI as GeminiNextGenAPI
+import warnings
+import httpx
 
+from ._api_client import has_aiohttp
+
+from . import _common
+
+from ._interactions import AsyncGeminiNextGenAPIClient, DEFAULT_MAX_RETRIES, GeminiNextGenAPIClient
+from . import _interactions
+
+from ._interactions.resources import AsyncInteractionsResource as AsyncNextGenInteractionsResource, InteractionsResource as NextGenInteractionsResource
+from ._interactions.resources import WebhooksResource, AsyncWebhooksResource, AgentsResource, AsyncAgentsResource
+_interactions_experimental_warned = False
 _agent_experimental_warned = False
-_trigger_experimental_warned = False
-_environment_experimental_warned = False
-_credential_experimental_warned = False
+
+class AsyncGeminiNextGenAPIClientAdapter(_interactions.AsyncGeminiNextGenAPIClientAdapter):
+  """Adapter for the Gemini NextGen API Client."""
+  def __init__(self, api_client: BaseApiClient):
+    self._api_client = api_client
+
+  def is_vertex_ai(self) -> bool:
+    return self._api_client.vertexai or False
+
+  def get_project(self) -> str | None:
+    return self._api_client.project
+
+  def get_location(self) -> str | None:
+    return self._api_client.location
+
+  async def async_get_auth_headers(self) -> dict[str, str]:
+    if self._api_client.api_key:
+      return {"x-goog-api-key": self._api_client.api_key}
+    access_token = await self._api_client._async_access_token()
+    headers = {
+      "Authorization": f"Bearer {access_token}",
+    }
+    if creds := self._api_client._credentials:
+      if creds.quota_project_id:
+        headers["x-goog-user-project"] = creds.quota_project_id
+    return headers
+
+
+class GeminiNextGenAPIClientAdapter(_interactions.GeminiNextGenAPIClientAdapter):
+  """Adapter for the Gemini NextGen API Client."""
+  def __init__(self, api_client: BaseApiClient):
+    self._api_client = api_client
+
+  def is_vertex_ai(self) -> bool:
+    return self._api_client.vertexai or False
+
+  def get_project(self) -> str | None:
+    return self._api_client.project
+
+  def get_location(self) -> str | None:
+    return self._api_client.location
+
+  def get_auth_headers(self) -> dict[str, str]:
+    if self._api_client.api_key:
+      return {"x-goog-api-key": self._api_client.api_key}
+    access_token = self._api_client._access_token()
+    headers = {
+      "Authorization": f"Bearer {access_token}",
+    }
+    if creds := self._api_client._credentials:
+      if creds.quota_project_id:
+        headers["x-goog-user-project"] = creds.quota_project_id
+    return headers
 
 
 class AsyncClient:
@@ -80,43 +119,93 @@ class AsyncClient:
     self._live = AsyncLive(self._api_client)
     self._tokens = AsyncTokens(self._api_client)
     self._operations = AsyncOperations(self._api_client)
-    self._nextgen_client_instance: Optional[AsyncGeminiNextGenAPI] = None
-    self._agents: Optional[AsyncGeminiNextGenAgents] = None
-    self._interactions: Optional[AsyncGeminiNextGenInteractions] = None
-    self._webhooks: Optional[AsyncGeminiNextGenWebhooks] = None
-    self._triggers: Optional[AsyncGeminiNextGenTriggers] = None
-    self._environments: Optional[AsyncGeminiNextGenEnvironments] = None
-    self._credentials: Optional[AsyncGeminiNextGenCredentials] = None
-    self._voices: Optional[AsyncGeminiNextGenVoices] = None
+    self._nextgen_client_instance: Optional[AsyncGeminiNextGenAPIClient] = None
 
   @property
-  def _nextgen_client(self) -> AsyncGeminiNextGenAPI:
-    if self._nextgen_client_instance is None:
-      from ._gaos.google_genai import build_google_genai_async_client
+  def _nextgen_client(self) -> AsyncGeminiNextGenAPIClient:
+    if self._nextgen_client_instance is not None:
+      return self._nextgen_client_instance
 
-      self._nextgen_client_instance = build_google_genai_async_client(
-          self._api_client
+    http_opts = self._api_client._http_options
+
+    if http_opts.extra_body:
+      warnings.warn(
+          'extra_body properties are not supported in `.interactions` yet',
+          category=UserWarning,
+          stacklevel=5,
       )
+
+    retry_opts = http_opts.retry_options
+    if retry_opts is not None and (
+        retry_opts.initial_delay is not None
+        or retry_opts.max_delay is not None
+        or retry_opts.exp_base is not None
+        or retry_opts.jitter is not None
+        or retry_opts.http_status_codes is not None
+    ):
+      warnings.warn(
+          'Granular retry options are not supported in `.interactions` yet',
+          category=UserWarning,
+          stacklevel=5,
+      )
+
+    http_client: Optional[httpx.AsyncClient] = (
+        self._api_client._async_httpx_client
+    )
+
+    async_client_args = self._api_client._http_options.async_client_args or {}
+    has_custom_transport = 'transport' in async_client_args
+
+    if has_aiohttp and not has_custom_transport:
+      warnings.warn(
+          'Async interactions client cannot use aiohttp, fallingback to httpx.',
+          category=UserWarning,
+          stacklevel=5,
+      )
+
+    if retry_opts is not None and retry_opts.attempts is not None:
+      max_retries = retry_opts.attempts
+    else:
+      max_retries = DEFAULT_MAX_RETRIES + 1
+
+    self._nextgen_client_instance = AsyncGeminiNextGenAPIClient(
+        base_url=http_opts.base_url,
+        api_key=self._api_client.api_key,
+        api_version=http_opts.api_version,
+        default_headers=http_opts.headers,
+        http_client=http_client,
+        # uSDk expects ms, nextgen uses a httpx Timeout -> expects seconds.
+        timeout=http_opts.timeout / 1000 if http_opts.timeout else None,
+        max_retries=max_retries,
+        client_adapter=AsyncGeminiNextGenAPIClientAdapter(self._api_client)
+    )
+
+    client = self._nextgen_client_instance
+    if self._api_client.vertexai:
+      client._is_vertex = True
+      client._vertex_project = self._api_client.project
+      client._vertex_location = self._api_client.location
+
     return self._nextgen_client_instance
 
   @property
-  def interactions(self) -> AsyncGeminiNextGenInteractions:
-    if self._interactions is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenInteractions
-
-      self._interactions = AsyncGeminiNextGenInteractions(self._api_client)
-    return self._interactions
-
-  @property
-  def webhooks(self) -> AsyncGeminiNextGenWebhooks:
-    if self._webhooks is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenWebhooks
-
-      self._webhooks = AsyncGeminiNextGenWebhooks(self._api_client)
-    return self._webhooks
+  def interactions(self) -> AsyncNextGenInteractionsResource:
+    global _interactions_experimental_warned
+    if not _interactions_experimental_warned:
+      _interactions_experimental_warned = True
+      warnings.warn(
+          'Interactions usage is experimental and may change in future versions.',
+          category=UserWarning,
+          stacklevel=1,
+      )
+    return self._nextgen_client.interactions
 
   @property
-  def agents(self) -> AsyncGeminiNextGenAgents:
+  def webhooks(self) -> AsyncWebhooksResource:
+    return self._nextgen_client.webhooks
+
+  @property
+  def agents(self) -> AsyncAgentsResource:
     global _agent_experimental_warned
     if not _agent_experimental_warned:
       _agent_experimental_warned = True
@@ -125,70 +214,14 @@ class AsyncClient:
           category=UserWarning,
           stacklevel=1,
       )
-    if self._agents is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenAgents
-
-      self._agents = AsyncGeminiNextGenAgents(self._api_client)
-    return self._agents
+    return self._nextgen_client.agents
 
   @property
-  def triggers(self) -> AsyncGeminiNextGenTriggers:
-    global _trigger_experimental_warned
-    if not _trigger_experimental_warned:
-      _trigger_experimental_warned = True
-      warnings.warn(
-          'Triggers usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=1,
-      )
-    if self._triggers is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenTriggers
-
-      self._triggers = AsyncGeminiNextGenTriggers(self._api_client)
-    return self._triggers
-
-  @property
-  def environments(self) -> AsyncGeminiNextGenEnvironments:
-    """Environments resource."""
-    global _environment_experimental_warned
-    if not _environment_experimental_warned:
-      _environment_experimental_warned = True
-      warnings.warn(
-          'Environments usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=1,
-      )
-    if self._environments is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenEnvironments
-
-      self._environments = AsyncGeminiNextGenEnvironments(self._api_client)
-    return self._environments
-
-  @property
-  def credentials(self) -> AsyncGeminiNextGenCredentials:
-    """Credentials resource."""
-    global _credential_experimental_warned
-    if not _credential_experimental_warned:
-      _credential_experimental_warned = True
-      warnings.warn(
-          'Credentials usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=1,
-      )
-    if self._credentials is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenCredentials
-
-      self._credentials = AsyncGeminiNextGenCredentials(self._api_client)
-    return self._credentials
-
-  @property
-  def voices(self) -> AsyncGeminiNextGenVoices:
-    """Voices resource."""
-    if self._voices is None:
-      from ._gaos.google_genai import AsyncGeminiNextGenVoices
-
-      self._voices = AsyncGeminiNextGenVoices(self._api_client)
-    return self._voices
+  def _has_nextgen_client(self) -> bool:
+    return (
+        hasattr(self, '_nextgen_client_instance') and
+        self._nextgen_client_instance is not None
+    )
 
   @property
   def models(self) -> AsyncModels:
@@ -242,20 +275,23 @@ class AsyncClient:
       from google.genai import Client
 
       async_client = Client(
-          enterprise=True, project='my-project-id', location='us-central1'
+          vertexai=True, project='my-project-id', location='us-central1'
       ).aio
       response_1 = await async_client.models.generate_content(
-          model='gemini-flash-latest',
+          model='gemini-2.0-flash',
           contents='Hello World',
       )
       response_2 = await async_client.models.generate_content(
-          model='gemini-flash-latest',
+          model='gemini-2.0-flash',
           contents='Hello World',
       )
       # Close the client to release resources.
       await async_client.aclose()
     """
     await self._api_client.aclose()
+
+    if self._has_nextgen_client:
+      await self._nextgen_client.close()
 
   async def __aenter__(self) -> 'AsyncClient':
     return self
@@ -438,14 +474,7 @@ class Client:
     self._files = Files(self._api_client)
     self._tokens = Tokens(self._api_client)
     self._operations = Operations(self._api_client)
-    self._nextgen_client_instance: Optional[GeminiNextGenAPI] = None
-    self._agents: Optional[GeminiNextGenAgents] = None
-    self._interactions: Optional[GeminiNextGenInteractions] = None
-    self._webhooks: Optional[GeminiNextGenWebhooks] = None
-    self._triggers: Optional[GeminiNextGenTriggers] = None
-    self._environments: Optional[GeminiNextGenEnvironments] = None
-    self._credentials: Optional[GeminiNextGenCredentials] = None
-    self._voices: Optional[GeminiNextGenVoices] = None
+    self._nextgen_client_instance: Optional[GeminiNextGenAPIClient] = None
 
   @staticmethod
   def _get_api_client(
@@ -484,33 +513,76 @@ class Client:
     )
 
   @property
-  def _nextgen_client(self) -> GeminiNextGenAPI:
-    if self._nextgen_client_instance is None:
-      from ._gaos.google_genai import build_google_genai_client
+  def _nextgen_client(self) -> GeminiNextGenAPIClient:
+    if self._nextgen_client_instance is not None:
+      return self._nextgen_client_instance
 
-      self._nextgen_client_instance = build_google_genai_client(
-          self._api_client
+    http_opts = self._api_client._http_options
+
+    if http_opts.extra_body:
+      warnings.warn(
+          'extra_body properties are not supported in `.interactions` yet',
+          category=UserWarning,
+          stacklevel=5,
       )
+
+    retry_opts = http_opts.retry_options
+    if retry_opts is not None and (
+        retry_opts.initial_delay is not None
+        or retry_opts.max_delay is not None
+        or retry_opts.exp_base is not None
+        or retry_opts.jitter is not None
+        or retry_opts.http_status_codes is not None
+    ):
+      warnings.warn(
+          'Granular retry options are not supported in `.interactions` yet',
+          category=UserWarning,
+          stacklevel=5,
+      )
+
+    if retry_opts is not None and retry_opts.attempts is not None:
+      max_retries = retry_opts.attempts
+    else:
+      max_retries = DEFAULT_MAX_RETRIES + 1
+
+    self._nextgen_client_instance = GeminiNextGenAPIClient(
+        base_url=http_opts.base_url,
+        api_key=self._api_client.api_key,
+        api_version=http_opts.api_version,
+        default_headers=http_opts.headers,
+        http_client=self._api_client._httpx_client,
+        # uSDk expects ms, nextgen uses a httpx Timeout -> expects seconds.
+        timeout=http_opts.timeout / 1000 if http_opts.timeout else None,
+        max_retries=max_retries,
+        client_adapter=GeminiNextGenAPIClientAdapter(self._api_client),
+    )
+
+    client = self._nextgen_client_instance
+    if self._api_client.vertexai:
+      client._is_vertex = True
+      client._vertex_project = self._api_client.project
+      client._vertex_location = self._api_client.location
+
     return self._nextgen_client_instance
 
   @property
-  def interactions(self) -> GeminiNextGenInteractions:
-    if self._interactions is None:
-      from ._gaos.google_genai import GeminiNextGenInteractions
-
-      self._interactions = GeminiNextGenInteractions(self._api_client)
-    return self._interactions
-
-  @property
-  def webhooks(self) -> GeminiNextGenWebhooks:
-    if self._webhooks is None:
-      from ._gaos.google_genai import GeminiNextGenWebhooks
-
-      self._webhooks = GeminiNextGenWebhooks(self._api_client)
-    return self._webhooks
+  def interactions(self) -> NextGenInteractionsResource:
+    global _interactions_experimental_warned
+    if not _interactions_experimental_warned:
+      _interactions_experimental_warned = True
+      warnings.warn(
+        'Interactions usage is experimental and may change in future versions.',
+        category=UserWarning,
+        stacklevel=2,
+      )
+    return self._nextgen_client.interactions
 
   @property
-  def agents(self) -> GeminiNextGenAgents:
+  def webhooks(self) -> WebhooksResource:
+    return self._nextgen_client.webhooks
+
+  @property
+  def agents(self) -> AgentsResource:
     global _agent_experimental_warned
     if not _agent_experimental_warned:
       _agent_experimental_warned = True
@@ -519,67 +591,14 @@ class Client:
         category=UserWarning,
         stacklevel=2,
       )
-    if self._agents is None:
-      from ._gaos.google_genai import GeminiNextGenAgents
-
-      self._agents = GeminiNextGenAgents(self._api_client)
-    return self._agents
+    return self._nextgen_client.agents
 
   @property
-  def triggers(self) -> GeminiNextGenTriggers:
-    global _trigger_experimental_warned
-    if not _trigger_experimental_warned:
-      _trigger_experimental_warned = True
-      warnings.warn(
-          'Triggers usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=2,
-      )
-    if self._triggers is None:
-      from ._gaos.google_genai import GeminiNextGenTriggers
-
-      self._triggers = GeminiNextGenTriggers(self._api_client)
-    return self._triggers
-
-  @property
-  def environments(self) -> GeminiNextGenEnvironments:
-    global _environment_experimental_warned
-    if not _environment_experimental_warned:
-      _environment_experimental_warned = True
-      warnings.warn(
-          'Environments usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=2,
-      )
-    if self._environments is None:
-      from ._gaos.google_genai import GeminiNextGenEnvironments
-
-      self._environments = GeminiNextGenEnvironments(self._api_client)
-    return self._environments
-
-  @property
-  def credentials(self) -> GeminiNextGenCredentials:
-    global _credential_experimental_warned
-    if not _credential_experimental_warned:
-      _credential_experimental_warned = True
-      warnings.warn(
-          'Credentials usage is experimental and may change in future versions.',
-          category=UserWarning,
-          stacklevel=2,
-      )
-    if self._credentials is None:
-      from ._gaos.google_genai import GeminiNextGenCredentials
-
-      self._credentials = GeminiNextGenCredentials(self._api_client)
-    return self._credentials
-
-  @property
-  def voices(self) -> GeminiNextGenVoices:
-    if self._voices is None:
-      from ._gaos.google_genai import GeminiNextGenVoices
-
-      self._voices = GeminiNextGenVoices(self._api_client)
-    return self._voices
+  def _has_nextgen_client(self) -> bool:
+    return (
+        hasattr(self, '_nextgen_client_instance') and
+        self._nextgen_client_instance is not None
+    )
 
   @property
   def chats(self) -> Chats:
@@ -638,20 +657,23 @@ class Client:
       from google.genai import Client
 
       client = Client(
-          enterprise=True, project='my-project-id', location='us-central1'
+          vertexai=True, project='my-project-id', location='us-central1'
       )
       response_1 = client.models.generate_content(
-          model='gemini-flash-latest',
+          model='gemini-2.0-flash',
           contents='Hello World',
       )
       response_2 = client.models.generate_content(
-          model='gemini-flash-latest',
+          model='gemini-2.0-flash',
           contents='Hello World',
       )
       # Close the client to release resources.
       client.close()
     """
     self._api_client.close()
+
+    if self._has_nextgen_client:
+      self._nextgen_client.close()
 
   def __enter__(self) -> 'Client':
     return self

@@ -18,27 +18,15 @@ import os
 from .... import types
 from ... import pytest_helper
 
-VEO_MODEL_LATEST_VERTEX = "veo-3.1-lite-generate-001"
+VEO_MODEL_LATEST = "veo-2.0-generate-001"
 
 
 test_table: list[pytest_helper.TestTableItem] = [
     pytest_helper.TestTableItem(
-        name="test_simple_prompt_vertex",
+        name="test_simple_prompt",
         parameters=types._GenerateVideosParameters(
-            model=VEO_MODEL_LATEST_VERTEX,
+            model=VEO_MODEL_LATEST,
             prompt="Man with a dog",
-            config=types.GenerateVideosConfig(
-                http_options=types.HttpOptions(
-                    retry_options=types.HttpRetryOptions(
-                        attempts=2,
-                        initial_delay=10.0,
-                        http_status_codes=[429, 500, 502, 503, 504],
-                    ),
-                ),
-            ),
-        ),
-        exception_if_mldev=(
-            "models/veo-3.1-lite-generate-001 is not found for API version v1beta"
         ),
     ),
 ]

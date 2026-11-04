@@ -1,6 +1,6 @@
 /Progetto_dir.code-workspace
 
-# Esclusione File di Stato e Directory Locali Terraform
+# Esclude Terraform state files and other generated files from version control
 .terraform/
 *.tfstate
 *.tfstate.*
@@ -12,3 +12,8 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 .terraform.lock.hcl
+
+# Esclude Python virtual environment directories and compiled files
+venv/
+src/layers/python/
+src/layers/*.zip

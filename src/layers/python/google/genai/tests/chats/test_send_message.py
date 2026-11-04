@@ -40,12 +40,10 @@ except ImportError as e:
     raise e
 
 
-pytestmark = [
-    pytest_helper.setup(
-        file=__file__,
-        globals_for_file=globals(),
-    ),
-]
+pytestmark = pytest_helper.setup(
+    file=__file__,
+    globals_for_file=globals(),
+)
 pytest_plugins = ('pytest_asyncio',)
 
 
@@ -335,9 +333,7 @@ def test_with_afc_multiple_remote_calls(client):
   chat.send_message('Turn this place into a party!')
   curated_history = chat.get_history()
 
-  # A budget of 3 buys 3 requests. The third is spent being asked for functions
-  # that no request is left to answer, so the turn ends on that call.
-  assert len(curated_history) == 6
+  assert len(curated_history) == 8
   assert curated_history[0].role == 'user'
   assert curated_history[0].parts[0].text == 'Turn this place into a party!'
   assert curated_history[1].role == 'model'
@@ -359,6 +355,14 @@ def test_with_afc_multiple_remote_calls(client):
   assert curated_history[5].role == 'model'
   assert len(curated_history[5].parts) == 3
   for part in curated_history[5].parts:
+    assert part.function_call
+  assert curated_history[6].role == 'user'
+  assert len(curated_history[6].parts) == 3
+  for part in curated_history[6].parts:
+    assert part.function_response
+  assert curated_history[7].role == 'model'
+  assert len(curated_history[7].parts) == 3
+  for part in curated_history[7].parts:
     assert part.function_call
 
 
@@ -388,9 +392,7 @@ def test_with_afc_multiple_remote_calls_async(client):
   chat.send_message('Turn this place into a party!')
   curated_history = chat.get_history()
 
-  # A budget of 3 buys 3 requests. The third is spent being asked for functions
-  # that no request is left to answer, so the turn ends on that call.
-  assert len(curated_history) == 6
+  assert len(curated_history) == 8
   assert curated_history[0].role == 'user'
   assert curated_history[0].parts[0].text == 'Turn this place into a party!'
   assert curated_history[1].role == 'model'
@@ -412,6 +414,14 @@ def test_with_afc_multiple_remote_calls_async(client):
   assert curated_history[5].role == 'model'
   assert len(curated_history[5].parts) == 3
   for part in curated_history[5].parts:
+    assert part.function_call
+  assert curated_history[6].role == 'user'
+  assert len(curated_history[6].parts) == 3
+  for part in curated_history[6].parts:
+    assert part.function_response
+  assert curated_history[7].role == 'model'
+  assert len(curated_history[7].parts) == 3
+  for part in curated_history[7].parts:
     assert part.function_call
 
 def test_with_afc_disabled(client):

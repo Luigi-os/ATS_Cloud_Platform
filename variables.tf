@@ -3,25 +3,25 @@
 # --------------------------- Input Variables --------------------------- #
 
 variable "project-name" {
-    description = "Nome del progetto."
+    description = "Name of the project. This variable is used to create unique names for AWS resources."
     type        = string
     default     = "gg-cv-archive-project"
 }
 
 variable "environment" {
-    description = "Ambiente di deployment."
+    description = "Environment in which the resources will be created."
     type        = string
     default     = "dev"
 }
 
 variable "region" {
-    description = "Regione AWS in cui creare le risorse."
+    description = "Aws region where the resources will be created."
     type        = string
     default     = "eu-north-1"
 }
 
 variable "gemini_api_key" {
-  description = "API Key per l'interazione con Google Gemini"
+  description = "API Key to authenticate requests to the Gemini API for CV parsing."
   type        = string
   sensitive   = true
 }

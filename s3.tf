@@ -29,13 +29,13 @@ resource "aws_s3_bucket_notification" "incoming_bucket_notification" {
     bucket = aws_s3_bucket.cv_incoming_bucket.id
 
     queue {
-        queue_arn     = aws_sqs_queue.cv_processing_queue.arn
+        queue_arn     = aws_sqs_queue.processing_queue.arn
         events        = ["s3:ObjectCreated:*"]
     }
 
     # With depends_on attribute this resource will be created after the SQS queue policy is created.
     depends_on = [
-        aws_sqs_queue_policy.cv_processing_queue_policy
+        aws_sqs_queue_policy.processing_queue_policy
     ]
 }
 
@@ -55,7 +55,7 @@ resource "aws_s3_bucket_cors_configuration" "incoming_bucket_cors" {
 # Because the incoming bucket is public, we need to block public access to it. This is made because the project is private.
 resource "aws_s3_bucket_public_access_block" "cv_incoming_public_access_block" {
     bucket = aws_s3_bucket.cv_incoming_bucket.id 
-
+        
     block_public_acls       = true
     block_public_policy     = true
     ignore_public_acls      = true

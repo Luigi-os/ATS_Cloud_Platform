@@ -313,12 +313,9 @@ def test_generate_content_stream_with_function_tools_used(
   )
 
   chunk = None
-  text_match = False
   for chunk in stream:
-    if chunk.text == TEST_AFC_TEXT_PART.text:
-      text_match = True
+    assert chunk.text == TEST_AFC_TEXT_PART.text
 
-  assert text_match
   assert mock_generate_content_stream_with_afc.call_count == 2
   assert mock_get_function_response_parts.call_count == 2
 
@@ -349,12 +346,9 @@ def test_generate_content_stream_with_thought_summaries(
   )
 
   chunk = None
-  text_match = False
   for chunk in stream:
-    if chunk.text == TEST_AFC_TEXT_PART.text:
-      text_match = True
+    assert chunk.text == TEST_AFC_TEXT_PART.text
 
-  assert text_match
   assert mock_generate_content_stream_with_afc.call_count == 2
   assert mock_get_function_response_parts.call_count == 2
 
@@ -455,12 +449,8 @@ async def test_generate_content_stream_with_function_tools_used_async(
   )
 
   chunk = None
-  text_match = False
   async for chunk in stream:
-    if chunk.text == TEST_AFC_TEXT_PART.text:
-      text_match = True
-
-  assert text_match
+    assert chunk.text == TEST_AFC_TEXT_PART.text
 
   assert mock_generate_content_stream_with_afc_async.call_count == 2
 
@@ -491,12 +481,8 @@ async def test_generate_content_stream_with_function_async_function_used_async(
   )
 
   chunk = None
-  text_match = False
   async for chunk in stream:
-    if chunk.text == TEST_AFC_TEXT_PART.text:
-      text_match = True
-
-  assert text_match
+    assert chunk.text == TEST_AFC_TEXT_PART.text
 
   assert mock_generate_content_stream_with_afc_async.call_count == 2
 
@@ -530,12 +516,8 @@ async def test_generate_content_stream_with_thought_summaries_async(
   )
 
   chunk = None
-  text_match = False
   async for chunk in stream:
-    if chunk.text == TEST_AFC_TEXT_PART.text:
-      text_match = True
-
-  assert text_match
+    assert chunk.text == TEST_AFC_TEXT_PART.text
 
   assert mock_generate_content_stream_with_afc_async.call_count == 2
 

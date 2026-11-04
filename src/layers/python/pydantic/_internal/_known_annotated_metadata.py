@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
 from copy import copy
 from functools import lru_cache, partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 from pydantic_core import CoreSchema, PydanticCustomError, ValidationError, to_jsonable_python
 from pydantic_core import core_schema as cs
@@ -30,26 +29,25 @@ STR_CONSTRAINTS = {
     'to_upper',
     'pattern',
     'coerce_numbers_to_str',
-    'ascii_only',
 }
 BYTES_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT}
 
 LIST_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT, *FAIL_FAST}
 TUPLE_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT, *FAIL_FAST}
 SET_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT, *FAIL_FAST}
-DICT_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT, *FAIL_FAST}
-GENERATOR_CONSTRAINTS = LENGTH_CONSTRAINTS
+DICT_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT}
+GENERATOR_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *STRICT}
 SEQUENCE_CONSTRAINTS = {*LENGTH_CONSTRAINTS, *FAIL_FAST}
 
 FLOAT_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *ALLOW_INF_NAN, *STRICT}
 DECIMAL_CONSTRAINTS = {'max_digits', 'decimal_places', *FLOAT_CONSTRAINTS}
-FRACTION_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *STRICT}
-INT_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *STRICT}
+INT_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *ALLOW_INF_NAN, *STRICT}
 BOOL_CONSTRAINTS = STRICT
 UUID_CONSTRAINTS = STRICT
 
-DATE_TIME_CONSTRAINTS = {*INEQUALITY, *STRICT}
+DATE_TIME_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *STRICT}
 TIMEDELTA_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *STRICT}
+TIME_CONSTRAINTS = {*NUMERIC_CONSTRAINTS, *STRICT}
 LAX_OR_STRICT_CONSTRAINTS = STRICT
 ENUM_CONSTRAINTS = STRICT
 COMPLEX_CONSTRAINTS = STRICT
@@ -62,24 +60,27 @@ URL_CONSTRAINTS = {
     'default_host',
     'default_port',
     'default_path',
-    *STRICT,
 }
+
+TEXT_SCHEMA_TYPES = ('str', 'bytes', 'url', 'multi-host-url')
+SEQUENCE_SCHEMA_TYPES = ('list', 'tuple', 'set', 'frozenset', 'generator', *TEXT_SCHEMA_TYPES)
+NUMERIC_SCHEMA_TYPES = ('float', 'int', 'date', 'time', 'timedelta', 'datetime')
 
 CONSTRAINTS_TO_ALLOWED_SCHEMAS: dict[str, set[str]] = defaultdict(set)
 
 constraint_schema_pairings: list[tuple[set[str], tuple[str, ...]]] = [
-    (STR_CONSTRAINTS, ('str',)),
+    (STR_CONSTRAINTS, TEXT_SCHEMA_TYPES),
     (BYTES_CONSTRAINTS, ('bytes',)),
-    (LIST_CONSTRAINTS, ('list', 'deque')),
+    (LIST_CONSTRAINTS, ('list',)),
     (TUPLE_CONSTRAINTS, ('tuple',)),
     (SET_CONSTRAINTS, ('set', 'frozenset')),
-    (DICT_CONSTRAINTS, ('dict', 'frozendict', 'ordered-dict', 'counter')),
+    (DICT_CONSTRAINTS, ('dict',)),
     (GENERATOR_CONSTRAINTS, ('generator',)),
     (FLOAT_CONSTRAINTS, ('float',)),
     (INT_CONSTRAINTS, ('int',)),
-    (DATE_TIME_CONSTRAINTS, ('date', 'time', 'datetime')),
-    (TIMEDELTA_CONSTRAINTS, ('timedelta',)),
-    (STRICT, ('typed-dict', 'model')),
+    (DATE_TIME_CONSTRAINTS, ('date', 'time', 'datetime', 'timedelta')),
+    # TODO: this is a bit redundant, we could probably avoid some of these
+    (STRICT, (*TEXT_SCHEMA_TYPES, *SEQUENCE_SCHEMA_TYPES, *NUMERIC_SCHEMA_TYPES, 'typed-dict', 'model')),
     (UNION_CONSTRAINTS, ('union',)),
     (URL_CONSTRAINTS, ('url', 'multi-host-url')),
     (BOOL_CONSTRAINTS, ('bool',)),
@@ -88,7 +89,6 @@ constraint_schema_pairings: list[tuple[set[str], tuple[str, ...]]] = [
     (ENUM_CONSTRAINTS, ('enum',)),
     (DECIMAL_CONSTRAINTS, ('decimal',)),
     (COMPLEX_CONSTRAINTS, ('complex',)),
-    (FRACTION_CONSTRAINTS, ('fraction',)),
 ]
 
 for constraints, schemas in constraint_schema_pairings:
@@ -181,8 +181,7 @@ def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | No
         An updated schema with annotation if it is an annotation we know about, `None` otherwise.
 
     Raises:
-        RuntimeError: If a constraint can't be applied to a specific schema type.
-        ValueError: If an unknown constraint is encountered.
+        PydanticCustomError: If `Predicate` fails.
     """
     import annotated_types as at
 
@@ -198,7 +197,6 @@ def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | No
         'to_lower',
         'to_upper',
         'coerce_numbers_to_str',
-        'ascii_only',
     }
     chain_schema_steps: list[CoreSchema] = []
 
@@ -264,12 +262,8 @@ def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | No
             else:
                 js_constraint_key = constraint
 
-            validator_kwargs = {constraint: value}
-            if constraint == 'decimal_places' and schema_update.get('max_digits') is not None:
-                # The whole digits limit depends on both constraints, and is checked alongside `decimal_places`:
-                validator_kwargs['max_digits'] = schema_update['max_digits']
             schema = cs.no_info_after_validator_function(
-                partial(NUMERIC_VALIDATOR_LOOKUP[constraint], **validator_kwargs), schema
+                partial(NUMERIC_VALIDATOR_LOOKUP[constraint], **{constraint: value}), schema
             )
             metadata = schema.get('metadata', {})
             if (existing_json_schema_updates := metadata.get('pydantic_js_updates')) is not None:
@@ -301,33 +295,26 @@ def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | No
             )
             continue
         elif isinstance(annotation, (at.Predicate, at.Not)):
-            predicate_name = f'{annotation.func.__qualname__!r} ' if hasattr(annotation.func, '__qualname__') else ''
+            predicate_name = f'{annotation.func.__qualname__}' if hasattr(annotation.func, '__qualname__') else ''
 
-            # Note: B023 is ignored because even though we iterate over `other_metadata`, it is guaranteed
-            # to be of length 1. `apply_known_metadata()` is called from `GenerateSchema`, where annotations
-            # were already expanded via `expand_grouped_metadata()`. Confusing, but this falls into the annotations
-            # refactor.
-            if isinstance(annotation, at.Predicate):
+            def val_func(v: Any) -> Any:
+                predicate_satisfied = annotation.func(v)  # noqa: B023
 
-                def val_func(v: Any) -> Any:
-                    predicate_satisfied = annotation.func(v)  # noqa: B023
+                # annotation.func may also raise an exception, let it pass through
+                if isinstance(annotation, at.Predicate):  # noqa: B023
                     if not predicate_satisfied:
                         raise PydanticCustomError(
                             'predicate_failed',
-                            f'Predicate {predicate_name}failed',  # pyright: ignore[reportArgumentType]  # noqa: B023
+                            f'Predicate {predicate_name} failed',  # type: ignore  # noqa: B023
                         )
-                    return v
-
-            else:
-
-                def val_func(v: Any) -> Any:
-                    predicate_satisfied = annotation.func(v)  # noqa: B023
+                else:
                     if predicate_satisfied:
                         raise PydanticCustomError(
                             'not_operation_failed',
-                            f'Not of {predicate_name}failed',  # pyright: ignore[reportArgumentType]  # noqa: B023
+                            f'Not of {predicate_name} failed',  # type: ignore  # noqa: B023
                         )
-                    return v
+
+                return v
 
             schema = cs.no_info_after_validator_function(val_func, schema)
         else:

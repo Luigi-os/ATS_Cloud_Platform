@@ -1,4 +1,5 @@
+google-genai
 boto3
 pypdf
-python-docx
-google-genai
+pydantic==2.10.6
+pydantic-core==2.27.2

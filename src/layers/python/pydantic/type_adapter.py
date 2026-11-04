@@ -3,27 +3,27 @@
 from __future__ import annotations as _annotations
 
 import sys
-import types
-from collections.abc import Callable, Iterable
 from dataclasses import is_dataclass
 from types import FrameType
 from typing import (
     Any,
     Generic,
+    Iterable,
     Literal,
     TypeVar,
     cast,
     final,
+    overload,
 )
 
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, Some
-from typing_extensions import ParamSpec, TypeForm, is_typeddict
+from typing_extensions import ParamSpec, is_typeddict
 
 from pydantic.errors import PydanticUserError
 from pydantic.main import BaseModel, IncEx
 
 from ._internal import _config, _generate_schema, _mock_val_ser, _namespace_utils, _repr, _typing_extra, _utils
-from .config import ConfigDict, ExtraValues
+from .config import ConfigDict
 from .errors import PydanticUndefinedAnnotation
 from .json_schema import (
     DEFAULT_REF_TEMPLATE,
@@ -67,8 +67,7 @@ def _type_has_config(type_: Any) -> bool:
 
 @final
 class TypeAdapter(Generic[T]):
-    """!!! abstract "Usage Documentation"
-        [`TypeAdapter`](../concepts/type_adapter.md)
+    """Usage docs: https://docs.pydantic.dev/2.10/concepts/type_adapter/
 
     Type adapters provide a flexible way to perform validation and serialization based on a Python type.
 
@@ -104,6 +103,18 @@ class TypeAdapter(Generic[T]):
         serializer: The schema serializer for the type.
         pydantic_complete: Whether the core schema for the type is successfully built.
 
+    ??? tip "Compatibility with `mypy`"
+        Depending on the type used, `mypy` might raise an error when instantiating a `TypeAdapter`. As a workaround, you can explicitly
+        annotate your variable:
+
+        ```py
+        from typing import Union
+
+        from pydantic import TypeAdapter
+
+        ta: TypeAdapter[Union[str, int]] = TypeAdapter(Union[str, int])  # type: ignore[arg-type]
+        ```
+
     ??? info "Namespace management nuances and implementation details"
 
         Here, we collect some notes on namespace management, and subtle differences from `BaseModel`:
@@ -125,8 +136,10 @@ class TypeAdapter(Generic[T]):
         For example, take the following:
 
         ```python {title="a.py"}
-        IntList = list[int]
-        OuterDict = dict[str, 'IntList']
+        from typing import Dict, List
+
+        IntList = List[int]
+        OuterDict = Dict[str, 'IntList']
         ```
 
         ```python {test="skip" title="b.py"}
@@ -157,9 +170,32 @@ class TypeAdapter(Generic[T]):
     serializer: SchemaSerializer
     pydantic_complete: bool
 
+    @overload
     def __init__(
         self,
-        type: TypeForm[T],
+        type: type[T],
+        *,
+        config: ConfigDict | None = ...,
+        _parent_depth: int = ...,
+        module: str | None = ...,
+    ) -> None: ...
+
+    # This second overload is for unsupported special forms (such as Annotated, Union, etc.)
+    # Currently there is no way to type this correctly
+    # See https://github.com/python/typing/pull/1618
+    @overload
+    def __init__(
+        self,
+        type: Any,
+        *,
+        config: ConfigDict | None = ...,
+        _parent_depth: int = ...,
+        module: str | None = ...,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        type: Any,
         *,
         config: ConfigDict | None = None,
         _parent_depth: int = 2,
@@ -180,35 +216,19 @@ class TypeAdapter(Generic[T]):
         self.pydantic_complete = False
 
         parent_frame = self._fetch_parent_frame()
-        if isinstance(type, types.FunctionType):
-            # Special case functions, which are *not* pushed to the `NsResolver` stack and without this special case
-            # would only have access to the parent namespace where the `TypeAdapter` was instantiated (if the function is defined
-            # in another module, we need to look at that module's globals).
-            if parent_frame is not None:
-                # `f_locals` is the namespace where the type adapter was instantiated (~ to `f_globals` if at the module level):
-                parent_ns = parent_frame.f_locals
-            else:  # pragma: no cover
-                parent_ns = None
-            globalns, localns = _namespace_utils.ns_for_function(
-                type,
-                parent_namespace=parent_ns,
-            )
-            parent_namespace = None
+        if parent_frame is not None:
+            globalns = parent_frame.f_globals
+            # Do not provide a local ns if the type adapter happens to be instantiated at the module level:
+            localns = parent_frame.f_locals if parent_frame.f_locals is not globalns else {}
         else:
-            if parent_frame is not None:
-                globalns = parent_frame.f_globals
-                # Do not provide a local ns if the type adapter happens to be instantiated at the module level:
-                localns = parent_frame.f_locals if parent_frame.f_locals is not globalns else {}
-            else:  # pragma: no cover
-                globalns = {}
-                localns = {}
-            parent_namespace = localns
+            globalns = {}
+            localns = {}
 
         self._module_name = module or cast(str, globalns.get('__name__', ''))
         self._init_core_attrs(
             ns_resolver=_namespace_utils.NsResolver(
                 namespaces_tuple=_namespace_utils.NamespacesTuple(locals=localns, globals=globalns),
-                parent_namespace=parent_namespace,
+                parent_namespace=localns,
             ),
             force=False,
         )
@@ -243,7 +263,7 @@ class TypeAdapter(Generic[T]):
                 and `raise_errors=True`.
         """
         if not force and self._defer_build:
-            _mock_val_ser.set_type_adapter_mocks(self)
+            _mock_val_ser.set_type_adapter_mocks(self, str(self._type))
             self.pydantic_complete = False
             return False
 
@@ -271,13 +291,13 @@ class TypeAdapter(Generic[T]):
             except PydanticUndefinedAnnotation:
                 if raise_errors:
                     raise
-                _mock_val_ser.set_type_adapter_mocks(self)
+                _mock_val_ser.set_type_adapter_mocks(self, str(self._type))
                 return False
 
             try:
                 self.core_schema = schema_generator.clean_schema(core_schema)
-            except _generate_schema.InvalidSchemaError:
-                _mock_val_ser.set_type_adapter_mocks(self)
+            except schema_generator.CollectedInvalid:
+                _mock_val_ser.set_type_adapter_mocks(self, str(self._type))
                 return False
 
             core_config = config_wrapper.core_config(None)
@@ -365,25 +385,15 @@ class TypeAdapter(Generic[T]):
         /,
         *,
         strict: bool | None = None,
-        extra: ExtraValues | None = None,
         from_attributes: bool | None = None,
-        context: Any | None = None,
+        context: dict[str, Any] | None = None,
         experimental_allow_partial: bool | Literal['off', 'on', 'trailing-strings'] = False,
-        by_alias: bool | None = None,
-        by_name: bool | None = None,
     ) -> T:
         """Validate a Python object against the model.
-
-        A [`ValidationError`][pydantic_core.ValidationError] reports the rejected locations and values.
-        If you record validations with [Logfire](../integrations/logfire.md), the complete object and trace
-        context are retained alongside the error — `TypeAdapter` validations are captured the same way as
-        model validations (see [Troubleshooting validation errors](../errors/troubleshooting.md)).
 
         Args:
             object: The Python object to validate against the model.
             strict: Whether to strictly check types.
-            extra: Whether to ignore, allow, or forbid extra data during model validation.
-                See the [`extra` configuration value][pydantic.ConfigDict.extra] for details.
             from_attributes: Whether to extract data from object attributes.
             context: Additional context to pass to the validator.
             experimental_allow_partial: **Experimental** whether to enable
@@ -391,8 +401,6 @@ class TypeAdapter(Generic[T]):
                 * False / 'off': Default behavior, no partial validation.
                 * True / 'on': Enable partial validation.
                 * 'trailing-strings': Enable partial validation and allow trailing strings in the input.
-            by_alias: Whether to use the field's alias when validating against the provided input data.
-            by_name: Whether to use the field's name when validating against the provided input data.
 
         !!! note
             When using `TypeAdapter` with a Pydantic `dataclass`, the use of the `from_attributes`
@@ -401,21 +409,12 @@ class TypeAdapter(Generic[T]):
         Returns:
             The validated object.
         """
-        if by_alias is False and by_name is not True:
-            raise PydanticUserError(
-                'At least one of `by_alias` or `by_name` must be set to True.',
-                code='validate-by-alias-and-name-false',
-            )
-
         return self.validator.validate_python(
             object,
             strict=strict,
-            extra=extra,
             from_attributes=from_attributes,
             context=context,
             allow_partial=experimental_allow_partial,
-            by_alias=by_alias,
-            by_name=by_name,
         )
 
     def validate_json(
@@ -424,53 +423,28 @@ class TypeAdapter(Generic[T]):
         /,
         *,
         strict: bool | None = None,
-        extra: ExtraValues | None = None,
-        context: Any | None = None,
+        context: dict[str, Any] | None = None,
         experimental_allow_partial: bool | Literal['off', 'on', 'trailing-strings'] = False,
-        by_alias: bool | None = None,
-        by_name: bool | None = None,
     ) -> T:
-        """!!! abstract "Usage Documentation"
-            [JSON Parsing](../concepts/json.md#json-parsing)
+        """Usage docs: https://docs.pydantic.dev/2.10/concepts/json/#json-parsing
 
         Validate a JSON string or bytes against the model.
-
-        JSON validated this way often comes from an external source, where a
-        [`ValidationError`][pydantic_core.ValidationError] can be the first sign that the source changed
-        shape. [Logfire](../integrations/logfire.md) retains the complete document and trace context
-        alongside the errors — see [Troubleshooting validation errors](../errors/troubleshooting.md).
 
         Args:
             data: The JSON data to validate against the model.
             strict: Whether to strictly check types.
-            extra: Whether to ignore, allow, or forbid extra data during model validation.
-                See the [`extra` configuration value][pydantic.ConfigDict.extra] for details.
             context: Additional context to use during validation.
             experimental_allow_partial: **Experimental** whether to enable
                 [partial validation](../concepts/experimental.md#partial-validation), e.g. to process streams.
                 * False / 'off': Default behavior, no partial validation.
                 * True / 'on': Enable partial validation.
                 * 'trailing-strings': Enable partial validation and allow trailing strings in the input.
-            by_alias: Whether to use the field's alias when validating against the provided input data.
-            by_name: Whether to use the field's name when validating against the provided input data.
 
         Returns:
             The validated object.
         """
-        if by_alias is False and by_name is not True:
-            raise PydanticUserError(
-                'At least one of `by_alias` or `by_name` must be set to True.',
-                code='validate-by-alias-and-name-false',
-            )
-
         return self.validator.validate_json(
-            data,
-            strict=strict,
-            extra=extra,
-            context=context,
-            allow_partial=experimental_allow_partial,
-            by_alias=by_alias,
-            by_name=by_name,
+            data, strict=strict, context=context, allow_partial=experimental_allow_partial
         )
 
     def validate_strings(
@@ -479,48 +453,29 @@ class TypeAdapter(Generic[T]):
         /,
         *,
         strict: bool | None = None,
-        extra: ExtraValues | None = None,
-        context: Any | None = None,
+        context: dict[str, Any] | None = None,
         experimental_allow_partial: bool | Literal['off', 'on', 'trailing-strings'] = False,
-        by_alias: bool | None = None,
-        by_name: bool | None = None,
     ) -> T:
         """Validate object contains string data against the model.
 
         Args:
             obj: The object contains string data to validate.
             strict: Whether to strictly check types.
-            extra: Whether to ignore, allow, or forbid extra data during model validation.
-                See the [`extra` configuration value][pydantic.ConfigDict.extra] for details.
             context: Additional context to use during validation.
             experimental_allow_partial: **Experimental** whether to enable
                 [partial validation](../concepts/experimental.md#partial-validation), e.g. to process streams.
                 * False / 'off': Default behavior, no partial validation.
                 * True / 'on': Enable partial validation.
                 * 'trailing-strings': Enable partial validation and allow trailing strings in the input.
-            by_alias: Whether to use the field's alias when validating against the provided input data.
-            by_name: Whether to use the field's name when validating against the provided input data.
 
         Returns:
             The validated object.
         """
-        if by_alias is False and by_name is not True:
-            raise PydanticUserError(
-                'At least one of `by_alias` or `by_name` must be set to True.',
-                code='validate-by-alias-and-name-false',
-            )
-
         return self.validator.validate_strings(
-            obj,
-            strict=strict,
-            extra=extra,
-            context=context,
-            allow_partial=experimental_allow_partial,
-            by_alias=by_alias,
-            by_name=by_name,
+            obj, strict=strict, context=context, allow_partial=experimental_allow_partial
         )
 
-    def get_default_value(self, *, strict: bool | None = None, context: Any | None = None) -> Some[T] | None:
+    def get_default_value(self, *, strict: bool | None = None, context: dict[str, Any] | None = None) -> Some[T] | None:
         """Get the default value for the wrapped type.
 
         Args:
@@ -540,17 +495,14 @@ class TypeAdapter(Generic[T]):
         mode: Literal['json', 'python'] = 'python',
         include: IncEx | None = None,
         exclude: IncEx | None = None,
-        by_alias: bool | None = None,
+        by_alias: bool = False,
         exclude_unset: bool = False,
         exclude_defaults: bool = False,
         exclude_none: bool = False,
-        exclude_computed_fields: bool = False,
         round_trip: bool = False,
         warnings: bool | Literal['none', 'warn', 'error'] = True,
-        fallback: Callable[[Any], Any] | None = None,
         serialize_as_any: bool = False,
-        polymorphic_serialization: bool | None = None,
-        context: Any | None = None,
+        context: dict[str, Any] | None = None,
     ) -> Any:
         """Dump an instance of the adapted type to a Python object.
 
@@ -563,16 +515,10 @@ class TypeAdapter(Generic[T]):
             exclude_unset: Whether to exclude unset fields.
             exclude_defaults: Whether to exclude fields with default values.
             exclude_none: Whether to exclude fields with None values.
-            exclude_computed_fields: Whether to exclude computed fields.
-                While this can be useful for round-tripping, it is usually recommended to use the dedicated
-                `round_trip` parameter instead.
             round_trip: Whether to output the serialized data in a way that is compatible with deserialization.
             warnings: How to handle serialization errors. False/"none" ignores them, True/"warn" logs errors,
                 "error" raises a [`PydanticSerializationError`][pydantic_core.PydanticSerializationError].
-            fallback: A function to call when an unknown value is encountered. If not provided,
-                a [`PydanticSerializationError`][pydantic_core.PydanticSerializationError] error is raised.
             serialize_as_any: Whether to serialize fields with duck-typing serialization behavior.
-            polymorphic_serialization: Whether to use model and dataclass polymorphic serialization for this call.
             context: Additional context to pass to the serializer.
 
         Returns:
@@ -587,12 +533,9 @@ class TypeAdapter(Generic[T]):
             exclude_unset=exclude_unset,
             exclude_defaults=exclude_defaults,
             exclude_none=exclude_none,
-            exclude_computed_fields=exclude_computed_fields,
             round_trip=round_trip,
             warnings=warnings,
-            fallback=fallback,
             serialize_as_any=serialize_as_any,
-            polymorphic_serialization=polymorphic_serialization,
             context=context,
         )
 
@@ -602,47 +545,34 @@ class TypeAdapter(Generic[T]):
         /,
         *,
         indent: int | None = None,
-        ensure_ascii: bool = False,
         include: IncEx | None = None,
         exclude: IncEx | None = None,
-        by_alias: bool | None = None,
+        by_alias: bool = False,
         exclude_unset: bool = False,
         exclude_defaults: bool = False,
         exclude_none: bool = False,
-        exclude_computed_fields: bool = False,
         round_trip: bool = False,
         warnings: bool | Literal['none', 'warn', 'error'] = True,
-        fallback: Callable[[Any], Any] | None = None,
         serialize_as_any: bool = False,
-        polymorphic_serialization: bool | None = None,
-        context: Any | None = None,
+        context: dict[str, Any] | None = None,
     ) -> bytes:
-        """!!! abstract "Usage Documentation"
-            [JSON Serialization](../concepts/json.md#json-serialization)
+        """Usage docs: https://docs.pydantic.dev/2.10/concepts/json/#json-serialization
 
         Serialize an instance of the adapted type to JSON.
 
         Args:
             instance: The instance to be serialized.
             indent: Number of spaces for JSON indentation.
-            ensure_ascii: If `True`, the output is guaranteed to have all incoming non-ASCII characters escaped.
-                If `False` (the default), these characters will be output as-is.
             include: Fields to include.
             exclude: Fields to exclude.
             by_alias: Whether to use alias names for field names.
             exclude_unset: Whether to exclude unset fields.
             exclude_defaults: Whether to exclude fields with default values.
             exclude_none: Whether to exclude fields with a value of `None`.
-            exclude_computed_fields: Whether to exclude computed fields.
-                While this can be useful for round-tripping, it is usually recommended to use the dedicated
-                `round_trip` parameter instead.
             round_trip: Whether to serialize and deserialize the instance to ensure round-tripping.
             warnings: How to handle serialization errors. False/"none" ignores them, True/"warn" logs errors,
                 "error" raises a [`PydanticSerializationError`][pydantic_core.PydanticSerializationError].
-            fallback: A function to call when an unknown value is encountered. If not provided,
-                a [`PydanticSerializationError`][pydantic_core.PydanticSerializationError] error is raised.
             serialize_as_any: Whether to serialize fields with duck-typing serialization behavior.
-            polymorphic_serialization: Whether to use model and dataclass polymorphic serialization for this call.
             context: Additional context to pass to the serializer.
 
         Returns:
@@ -651,74 +581,52 @@ class TypeAdapter(Generic[T]):
         return self.serializer.to_json(
             instance,
             indent=indent,
-            ensure_ascii=ensure_ascii,
             include=include,
             exclude=exclude,
             by_alias=by_alias,
             exclude_unset=exclude_unset,
             exclude_defaults=exclude_defaults,
             exclude_none=exclude_none,
-            exclude_computed_fields=exclude_computed_fields,
             round_trip=round_trip,
             warnings=warnings,
-            fallback=fallback,
             serialize_as_any=serialize_as_any,
-            polymorphic_serialization=polymorphic_serialization,
             context=context,
         )
 
     def json_schema(
         self,
         *,
-        by_alias: bool | None = None,
+        by_alias: bool = True,
         ref_template: str = DEFAULT_REF_TEMPLATE,
-        union_format: Literal['any_of', 'primitive_type_array'] = 'any_of',
         schema_generator: type[GenerateJsonSchema] = GenerateJsonSchema,
         mode: JsonSchemaMode = 'validation',
     ) -> dict[str, Any]:
         """Generate a JSON schema for the adapted type.
 
         Args:
-            by_alias: Whether to use field aliases as keys in the generated JSON Schema. If `None` (the default),
-                aliases are used unless disabled by the configuration (i.e. `validate_by_alias=False` for validation
-                schemas). An explicit value takes precedence over the configuration.
+            by_alias: Whether to use alias names for field names.
             ref_template: The format string used for generating $ref strings.
-            union_format: The format to use when combining schemas from unions together. Can be one of:
-
-                - `'any_of'`: Use the [`anyOf`](https://json-schema.org/understanding-json-schema/reference/combining#anyOf)
-                keyword to combine schemas (the default).
-                - `'primitive_type_array'`: Use the [`type`](https://json-schema.org/understanding-json-schema/reference/type)
-                keyword as an array of strings, containing each type of the combination. If any of the schemas is not a primitive
-                type (`string`, `boolean`, `null`, `integer` or `number`) or contains constraints/metadata, falls back to
-                `any_of`.
-            schema_generator: To override the logic used to generate the JSON schema, as a subclass of
-                `GenerateJsonSchema` with your desired modifications
-            mode: The mode in which to generate the schema.
+            schema_generator: The generator class used for creating the schema.
+            mode: The mode to use for schema generation.
 
         Returns:
             The JSON schema for the model as a dictionary.
         """
-        schema_generator_instance = schema_generator(
-            by_alias=by_alias, ref_template=ref_template, union_format=union_format
-        )
+        schema_generator_instance = schema_generator(by_alias=by_alias, ref_template=ref_template)
         if isinstance(self.core_schema, _mock_val_ser.MockCoreSchema):
             self.core_schema.rebuild()
             assert not isinstance(self.core_schema, _mock_val_ser.MockCoreSchema), 'this is a bug! please report it'
-        # The configuration provided to the type adapter (if any) is not part of the core schema,
-        # so we need to explicitly make it available to the JSON Schema generator:
-        with schema_generator_instance._config_wrapper_stack.push(self._config):
-            return schema_generator_instance.generate(self.core_schema, mode=mode)
+        return schema_generator_instance.generate(self.core_schema, mode=mode)
 
     @staticmethod
     def json_schemas(
         inputs: Iterable[tuple[JsonSchemaKeyT, JsonSchemaMode, TypeAdapter[Any]]],
         /,
         *,
-        by_alias: bool | None = None,
+        by_alias: bool = True,
         title: str | None = None,
         description: str | None = None,
         ref_template: str = DEFAULT_REF_TEMPLATE,
-        union_format: Literal['any_of', 'primitive_type_array'] = 'any_of',
         schema_generator: type[GenerateJsonSchema] = GenerateJsonSchema,
     ) -> tuple[dict[tuple[JsonSchemaKeyT, JsonSchemaMode], JsonSchemaValue], JsonSchemaValue]:
         """Generate a JSON schema including definitions from multiple type adapters.
@@ -727,20 +635,10 @@ class TypeAdapter(Generic[T]):
             inputs: Inputs to schema generation. The first two items will form the keys of the (first)
                 output mapping; the type adapters will provide the core schemas that get converted into
                 definitions in the output JSON schema.
-            by_alias: Whether to use field aliases as keys in the generated JSON Schema. If `None` (the default),
-                aliases are used unless disabled by the configuration (i.e. `validate_by_alias=False` for validation
-                schemas). An explicit value takes precedence over the configuration.
+            by_alias: Whether to use alias names.
             title: The title for the schema.
             description: The description for the schema.
             ref_template: The format string used for generating $ref strings.
-            union_format: The format to use when combining schemas from unions together. Can be one of:
-
-                - `'any_of'`: Use the [`anyOf`](https://json-schema.org/understanding-json-schema/reference/combining#anyOf)
-                keyword to combine schemas (the default).
-                - `'primitive_type_array'`: Use the [`type`](https://json-schema.org/understanding-json-schema/reference/type)
-                keyword as an array of strings, containing each type of the combination. If any of the schemas is not a primitive
-                type (`string`, `boolean`, `null`, `integer` or `number`) or contains constraints/metadata, falls back to
-                `any_of`.
             schema_generator: The generator class used for creating the schema.
 
         Returns:
@@ -753,18 +651,16 @@ class TypeAdapter(Generic[T]):
                     element, along with the optional title and description keys.
 
         """
-        schema_generator_instance = schema_generator(
-            by_alias=by_alias, ref_template=ref_template, union_format=union_format
-        )
+        schema_generator_instance = schema_generator(by_alias=by_alias, ref_template=ref_template)
 
         inputs_ = []
         for key, mode, adapter in inputs:
             # This is the same pattern we follow for model json schemas - we attempt a core schema rebuild if we detect a mock
             if isinstance(adapter.core_schema, _mock_val_ser.MockCoreSchema):
                 adapter.core_schema.rebuild()
-                assert not isinstance(adapter.core_schema, _mock_val_ser.MockCoreSchema), (
-                    'this is a bug! please report it'
-                )
+                assert not isinstance(
+                    adapter.core_schema, _mock_val_ser.MockCoreSchema
+                ), 'this is a bug! please report it'
             inputs_.append((key, mode, adapter.core_schema))
 
         json_schemas_map, definitions = schema_generator_instance.generate_definitions(inputs_)

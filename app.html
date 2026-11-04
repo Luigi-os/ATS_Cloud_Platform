@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portale ATS - Gestione e Candidature</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 700px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #333;
+            line-height: 1.5;
+        }
+        .card {
+            background: #f9f9f9;
+            border: 1px solid #e2e2e2;
+            border-radius: 6px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.4rem;
+            font-weight: 600;
+        }
+        input[type="text"], select, textarea {
+            width: 100%;
+            padding: 0.6rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+        button {
+            background-color: #0056b3;
+            color: #ffffff;
+            border: none;
+            padding: 0.75rem 1.2rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button.danger {
+            background-color: #c62828;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        th, td {
+            border: 1px solid #e0e0e0;
+            padding: 0.75rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+        tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+        .candidates-section {
+            display: none;
+        }
+        .job-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .job-item:last-child {
+            border-bottom: none;
+        }
+        .status {
+            margin-top: 1rem;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .status.success { color: #2e7d32; }
+        .status.error { color: #c62828; }
+        .status.info { color: #1565c0; }
+    </style>
+</head>
+<body>
+
+    <h1>ATS Cloud Platform</h1>
+
+    <div class="card">
+        <h2>Area Recruiter: Pubblica Posizione</h2>
+        <div class="form-group">
+            <label for="jobTitle">Titolo della Posizione</label>
+            <input type="text" id="jobTitle" placeholder="Es. Senior Backend Engineer">
+        </div>
+        <div class="form-group">
+            <label for="jobDescription">Job Description</label>
+            <textarea id="jobDescription" rows="4" placeholder="Inserire requisiti e responsabilita'..."></textarea>
+        </div>
+        <button id="addJobBtn" style="width: 100%;">Pubblica Job Description</button>
+        <div id="recruiterStatus" class="status"></div>
+
+        <h3 style="margin-top: 2rem;">Posizioni Attive</h3>
+        <div id="jobsList">Caricamento in corso...</div>
+    </div>
+
+    <div class="card">
+        <h2>Area Candidato: Invia Curriculum</h2>
+        <div class="form-group">
+            <label for="jobSelect">Seleziona Posizione</label>
+            <select id="jobSelect">
+                <option value="">Caricamento posizioni in corso...</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="cvFile">Curriculum Vitae (PDF, TXT)</label>
+            <input type="file" id="cvFile" accept=".pdf,.txt">
+        </div>
+        <button id="uploadCvBtn" style="width: 100%;">Invia Candidatura</button>
+        <div id="candidateStatus" class="status"></div>
+    </div>
+    <div class="card candidates-section" id="candidatesCard">
+        <h2 id="candidatesTitle">Candidati</h2>
+        <div id="candidatesContainer"></div>
+    </div>
+    <script>
+        const API_BASE_URL = "https://eyijbj7s5l.execute-api.eu-north-1.amazonaws.com";
+
+        async function fetchJobs() {
+            const select = document.getElementById('jobSelect');
+            const list = document.getElementById('jobsList');
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs`);
+                if (!response.ok) throw new Error("Errore durante il recupero dei dati.");
+                
+                const jobs = await response.json();
+                
+                select.innerHTML = '<option value="">-- Seleziona una posizione --</option>';
+                list.innerHTML = '';
+
+                if (jobs.length === 0) {
+                    list.innerHTML = '<p style="color: #666;">Nessuna posizione attiva.</p>';
+                    return;
+                }
+                
+                jobs.forEach(job => {
+                    const id = job.job_id || job.JobID;
+                    
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = `${job.title} (${id})`;
+                    select.appendChild(option);
+
+                    const item = document.createElement('div');
+                    item.className = 'job-item';
+                    item.innerHTML = `
+                        <div>
+                            <strong>${job.title}</strong> <small>(${id})</small>
+                        </div>
+                        <div>
+                            <button style="padding: 0.4rem 0.8rem; font-size: 0.85rem; background-color: #2e7d32;" onclick="viewCandidates('${id}')">Candidati</button>
+                            <button class="danger" onclick="deleteJob('${id}')">Elimina</button>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+            } catch (error) {
+                select.innerHTML = '<option value="">Impossibile caricare le posizioni</option>';
+                list.innerHTML = '<p style="color: #c62828;">Errore nel caricamento delle posizioni.</p>';
+                console.error(error);
+            }
+        }
+
+        async function handleAddJob() {
+            const title = document.getElementById('jobTitle').value.trim();
+            const description = document.getElementById('jobDescription').value.trim();
+            const status = document.getElementById('recruiterStatus');
+            const btn = document.getElementById('addJobBtn');
+
+            if (!title || !description) {
+                showStatus(status, "Tutti i campi sono obbligatori.", "error");
+                return;
+            }
+
+            btn.disabled = true;
+            showStatus(status, "Invio in corso...", "info");
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, description })
+                });
+
+                if (!response.ok) throw new Error("Errore durante la creazione del job.");
+
+                const data = await response.json();
+                const createdId = data.job_id;
+                
+                showStatus(status, `Posizione creata con successo! ID: ${createdId}`, "success");
+                
+                document.getElementById('jobTitle').value = "";
+                document.getElementById('jobDescription').value = "";
+                await fetchJobs();
+            } catch (error) {
+                showStatus(status, "Errore nella creazione della posizione.", "error");
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteJob(jobId) {
+            if (!confirm(`Confermi l'eliminazione della posizione ${jobId}?`)) return;
+
+            const status = document.getElementById('recruiterStatus');
+            showStatus(status, `Eliminazione posizione ${jobId}...`, "info");
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error("Eliminazione fallita.");
+
+                showStatus(status, `Posizione ${jobId} eliminata con successo.`, "success");
+                await fetchJobs();
+            } catch (error) {
+                showStatus(status, "Errore durante l'eliminazione della posizione.", "error");
+                console.error(error);
+            }
+        }
+
+        async function handleUploadCv() {
+            const jobSelect = document.getElementById('jobSelect');
+            const fileInput = document.getElementById('cvFile');
+            const status = document.getElementById('candidateStatus');
+            const btn = document.getElementById('uploadCvBtn');
+
+            if (!jobSelect.value || !fileInput.files[0]) {
+                showStatus(status, "Selezionare una posizione e allegare un file.", "error");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const candidateId = `cand_${Date.now()}`;
+            const fileExtension = file.name.substring(file.name.lastIndexOf('.'));
+            const sanitizedFileName = `${candidateId}${fileExtension}`;
+
+            btn.disabled = true;
+            showStatus(status, "Conversione e invio file in corso...", "info");
+
+            try {
+                // Converte il file in stringa Base64 leggendolo come ArrayBuffer
+                const reader = new FileReader();
+                
+                const base64Data = await new Promise((resolve, reject) => {
+                    reader.onload = () => {
+                        const base64String = btoa(
+                            new Uint8Array(reader.result)
+                                .reduce((data, byte) => data + String.fromCharCode(byte), '')
+                        );
+                        resolve(base64String);
+                    };
+                    reader.onerror = error => reject(error);
+                    reader.readAsArrayBuffer(file);
+                });
+
+                const response = await fetch(`${API_BASE_URL}/upload`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_id: jobSelect.value,
+                        file_name: sanitizedFileName,
+                        file_base64: base64Data
+                    })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.error_message || "Caricamento fallito.");
+                }
+
+                showStatus(status, "Candidatura inviata con successo!", "success");
+                fileInput.value = "";
+            } catch (error) {
+                showStatus(status, `Errore: ${error.message}`, "error");
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+            }
+}
+
+        // Funzione per caricare e mostrare i candidati di una posizione
+        async function viewCandidates(jobId) {
+            const card = document.getElementById('candidatesCard');
+            const title = document.getElementById('candidatesTitle');
+            const container = document.getElementById('candidatesContainer');
+
+            card.style.display = 'block';
+            title.textContent = `Graduatoria Candidati - Job ${jobId}`;
+            container.innerHTML = 'Caricamento in corso...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/candidates`);
+                
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    const msg = errData.error_message || errData.message || `Errore HTTP ${response.status}`;
+                    throw new Error(msg);
+                }
+                
+                const candidates = await response.json();
+                
+                if (!candidates || candidates.length === 0) {
+                    container.innerHTML = '<p>Non ci sono ancora candidati per questa posizione.</p>';
+                    return;
+                }
+
+                let tableHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Pos</th>
+                                <th>ID Candidato</th>
+                                <th>Score</th>
+                                <th>Giustificazione</th>
+                                <th>Skills Coincidenti</th>
+                                <th>Skills Mancanti</th>
+                                <th>Curriculum</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                candidates.forEach((cand, index) => {
+                    const matchSkills = Array.isArray(cand.matching_skills) ? cand.matching_skills.join(', ') : (cand.matching_skills || '-');
+                    const missSkills = Array.isArray(cand.missing_skills) ? cand.missing_skills.join(', ') : (cand.missing_skills || '-');
+                    
+                    const cvButton = cand.cv_url 
+                        ? `<a href="${cand.cv_url}" target="_blank" style="padding: 0.4rem 0.8rem; background-color: #1565c0; color: white; text-decoration: none; border-radius: 4px; font-size: 0.85rem; display: inline-block;">Apri PDF</a>`
+                        : `<span style="color: #999; font-size: 0.85rem;">Non disp.</span>`;
+
+                    tableHTML += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${cand.CandidateID || '-'}</td>
+                            <td><strong>${cand.score || '0'}/100</strong></td>
+                            <td>${cand.justification || '-'}</td>
+                            <td>${matchSkills}</td>
+                            <td>${missSkills}</td>
+                            <td style="text-align: center;">${cvButton}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHTML += `
+                        </tbody>
+                    </table>
+                `;
+
+                container.innerHTML = tableHTML;
+
+            } catch (error) {
+                container.innerHTML = `<p class="status error">Errore durante il recupero dei candidati: ${error.message}</p>`;
+                console.error("Dettaglio errore:", error);
+            }
+        }
+                    
+        function showStatus(element, message, type) {
+            element.textContent = message;
+            element.className = `status ${type}`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchJobs();
+            document.getElementById('addJobBtn').addEventListener('click', handleAddJob);
+            document.getElementById('uploadCvBtn').addEventListener('click', handleUploadCv);
+        });
+    </script>
+</body>
+</html>

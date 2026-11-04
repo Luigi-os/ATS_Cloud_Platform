@@ -1,31 +1,29 @@
 from __future__ import annotations
 
-import operator
 import sys
 import types
 import typing
 from collections import ChainMap
-from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from functools import reduce
-from itertools import zip_longest
 from types import prepare_class
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, MutableMapping, Tuple, TypeVar
 from weakref import WeakValueDictionary
 
 import typing_extensions
-from typing_inspection import typing_objects
-from typing_inspection.introspection import is_union_origin
 
-from . import _type_refs, _typing_extra
+from . import _typing_extra
+from ._core_utils import get_type_ref
 from ._forward_ref import PydanticRecursiveRef
 from ._utils import all_identical, is_model_class
+
+if sys.version_info >= (3, 10):
+    from typing import _UnionGenericAlias  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from ..main import BaseModel
 
-GenericTypesCacheKey = tuple[Any, Any, tuple[Any, ...]]
+GenericTypesCacheKey = Tuple[Any, Any, Tuple[Any, ...]]
 
 # Note: We want to remove LimitedDict, but to do this, we'd need to improve the handling of generics caching.
 #   Right now, to handle recursive generics, we some types must remain cached for brief periods without references.
@@ -36,25 +34,38 @@ GenericTypesCacheKey = tuple[Any, Any, tuple[Any, ...]]
 KT = TypeVar('KT')
 VT = TypeVar('VT')
 _LIMITED_DICT_SIZE = 100
+if TYPE_CHECKING:
 
+    class LimitedDict(dict, MutableMapping[KT, VT]):
+        def __init__(self, size_limit: int = _LIMITED_DICT_SIZE): ...
 
-class LimitedDict(dict[KT, VT]):
-    def __init__(self, size_limit: int = _LIMITED_DICT_SIZE) -> None:
-        self.size_limit = size_limit
-        super().__init__()
+else:
 
-    def __setitem__(self, key: KT, value: VT, /) -> None:
-        super().__setitem__(key, value)
-        if len(self) > self.size_limit:
-            excess = len(self) - self.size_limit + self.size_limit // 10
-            to_remove = list(self.keys())[:excess]
-            for k in to_remove:
-                del self[k]
+    class LimitedDict(dict):
+        """Limit the size/length of a dict used for caching to avoid unlimited increase in memory usage.
+
+        Since the dict is ordered, and we always remove elements from the beginning, this is effectively a FIFO cache.
+        """
+
+        def __init__(self, size_limit: int = _LIMITED_DICT_SIZE):
+            self.size_limit = size_limit
+            super().__init__()
+
+        def __setitem__(self, key: Any, value: Any, /) -> None:
+            super().__setitem__(key, value)
+            if len(self) > self.size_limit:
+                excess = len(self) - self.size_limit + self.size_limit // 10
+                to_remove = list(self.keys())[:excess]
+                for k in to_remove:
+                    del self[k]
 
 
 # weak dictionaries allow the dynamically created parametrized versions of generic models to get collected
 # once they are no longer referenced by the caller.
-GenericTypesCache = WeakValueDictionary[GenericTypesCacheKey, 'type[BaseModel]']
+if sys.version_info >= (3, 9):  # Typing for weak dictionaries available at 3.9
+    GenericTypesCache = WeakValueDictionary[GenericTypesCacheKey, 'type[BaseModel]']
+else:
+    GenericTypesCache = WeakValueDictionary
 
 if TYPE_CHECKING:
 
@@ -95,7 +106,7 @@ else:
 _GENERIC_TYPES_CACHE = GenericTypesCache()
 
 
-class PydanticGenericMetadata(TypedDict):
+class PydanticGenericMetadata(typing_extensions.TypedDict):
     origin: type[BaseModel] | None  # analogous to typing._GenericAlias.__origin__
     args: tuple[Any, ...]  # analogous to typing._GenericAlias.__args__
     parameters: tuple[TypeVar, ...]  # analogous to typing.Generic.__parameters__
@@ -119,24 +130,7 @@ def create_generic_submodel(
     Returns:
         The created submodel.
     """
-    model_module, called_globally = _get_caller_frame_info(depth=3)
-    # If parametrized at the module level, the parametrized class is registered in this module (see below).
-    # Its `__module__` must match. We fall back to the module of the origin for backwards compatibility reasons.
-    module = model_module if called_globally and model_module is not None else origin.__module__
-    namespace: dict[str, Any] = {'__module__': module}
-    # As per https://docs.python.org/3/reference/datamodel.html#slots:
-    # "The action of a __slots__ declaration is not limited to the class where it is defined.
-    # __slots__ declared in parents are available in child classes. However, instances of a
-    # child subclass will get a __dict__ and __weakref__ unless the subclass also defines
-    # __slots__".
-    # Because when users parameterize a generic model, we create a subclass of such generic model
-    # (what happens in this function), they can't control the fact that no slots is defined on the
-    # dynamic subclass, and so even if they defined extra __slots__ on the generic class (which results
-    # in the class *not* being weakref-able), the parameterized class *will* be weakref-able.
-    # For this reason (and to make Pydantic generic models behavior closer to generic aliases),
-    # we forward any slots from the origin:
-    if '__slots__' in origin.__dict__:
-        namespace['__slots__'] = origin.__dict__['__slots__']
+    namespace: dict[str, Any] = {'__module__': origin.__module__}
     bases = (origin,)
     meta, ns, kwds = prepare_class(model_name, bases)
     namespace.update(ns)
@@ -153,10 +147,11 @@ def create_generic_submodel(
         **kwds,
     )
 
+    model_module, called_globally = _get_caller_frame_info(depth=3)
     if called_globally:  # create global reference and therefore allow pickling
         object_by_reference = None
         reference_name = model_name
-        reference_module_globals = sys.modules[module].__dict__
+        reference_module_globals = sys.modules[created_model.__module__].__dict__
         while object_by_reference is not created_model:
             object_by_reference = reference_module_globals.setdefault(reference_name, created_model)
             reference_name += '_'
@@ -189,7 +184,7 @@ def _get_caller_frame_info(depth: int = 2) -> tuple[str | None, bool]:
 DictValues: type[Any] = {}.values().__class__
 
 
-def iter_contained_typevars(v: Any) -> Generator[TypeVar]:
+def iter_contained_typevars(v: Any) -> Iterator[TypeVar]:
     """Recursively iterate through all subtypes and type args of `v` and yield any typevars that are found.
 
     This is inspired as an alternative to directly accessing the `__parameters__` attribute of a GenericAlias,
@@ -236,10 +231,10 @@ def get_standard_typevars_map(cls: Any) -> dict[TypeVar, Any] | None:
     # So it is safe to access cls.__args__ and origin.__parameters__
     args: tuple[Any, ...] = cls.__args__  # type: ignore
     parameters: tuple[TypeVar, ...] = origin.__parameters__
-    return dict(zip(parameters, args, strict=True))
+    return dict(zip(parameters, args))
 
 
-def get_model_typevars_map(cls: type[BaseModel]) -> dict[TypeVar, Any]:
+def get_model_typevars_map(cls: type[BaseModel]) -> dict[TypeVar, Any] | None:
     """Package a generic BaseModel's typevars and concrete parametrization (if present) into a dictionary compatible
     with the `replace_types` function.
 
@@ -251,13 +246,10 @@ def get_model_typevars_map(cls: type[BaseModel]) -> dict[TypeVar, Any]:
     generic_metadata = cls.__pydantic_generic_metadata__
     origin = generic_metadata['origin']
     args = generic_metadata['args']
-    if not args:
-        # No need to go into `iter_contained_typevars`:
-        return {}
-    return dict(zip(iter_contained_typevars(origin), args, strict=True))
+    return dict(zip(iter_contained_typevars(origin), args))
 
 
-def replace_types(type_: Any, type_map: Mapping[TypeVar, Any] | None) -> Any:
+def replace_types(type_: Any, type_map: Mapping[Any, Any] | None) -> Any:
     """Return type with all occurrences of `type_map` keys recursively replaced with their values.
 
     Args:
@@ -270,23 +262,27 @@ def replace_types(type_: Any, type_map: Mapping[TypeVar, Any] | None) -> Any:
 
     Example:
         ```python
+        from typing import List, Tuple, Union
+
         from pydantic._internal._generics import replace_types
 
-        replace_types(tuple[str, list[str] | float], {str: int})
-        #> tuple[int, list[int] | float]
+        replace_types(Tuple[str, Union[List[str], float]], {str: int})
+        #> Tuple[int, Union[List[int], float]]
         ```
     """
     if not type_map:
         return type_
 
     type_args = get_args(type_)
-    origin_type = get_origin(type_)
 
-    if typing_objects.is_annotated(origin_type):
+    if _typing_extra.is_annotated(type_):
         annotated_type, *annotations = type_args
-        annotated_type = replace_types(annotated_type, type_map)
-        # TODO remove parentheses when we drop support for Python 3.10:
-        return Annotated[(annotated_type, *annotations)]
+        annotated = replace_types(annotated_type, type_map)
+        for annotation in annotations:
+            annotated = typing_extensions.Annotated[annotated, annotation]
+        return annotated
+
+    origin_type = get_origin(type_)
 
     # Having type args is a good indicator that this is a typing special form
     # instance or a generic alias of some sort.
@@ -309,23 +305,21 @@ def replace_types(type_: Any, type_map: Mapping[TypeVar, Any] | None) -> Any:
             origin_type = getattr(typing, type_._name)
         assert origin_type is not None
 
-        if is_union_origin(origin_type):
-            if any(typing_objects.is_any(arg) for arg in resolved_type_args):
+        if _typing_extra.origin_is_union(origin_type):
+            if any(_typing_extra.is_any(arg) for arg in resolved_type_args):
                 # `Any | T` ~ `Any`:
                 resolved_type_args = (Any,)
             # `Never | T` ~ `T`:
             resolved_type_args = tuple(
                 arg
                 for arg in resolved_type_args
-                if not (typing_objects.is_noreturn(arg) or typing_objects.is_never(arg))
+                if not (_typing_extra.is_no_return(arg) or _typing_extra.is_never(arg))
             )
 
-        # PEP-604 syntax (e.g. `list | str`) is represented with a types.UnionType object that does not
-        # implement `__getitem__()`. In Python 3.14+, `typing.Union` and `types.UnionType` are the same,
-        # and we instead rely on `typing.Union` as it implicitly converts string annotations to `ForwardRef`
-        # instances (this is to avoid type errors as per https://github.com/python/cpython/pull/105366).
-        if sys.version_info < (3, 14) and origin_type is types.UnionType:
-            return reduce(operator.or_, resolved_type_args)
+        # PEP-604 syntax (Ex.: list | str) is represented with a types.UnionType object that does not have __getitem__.
+        # We also cannot use isinstance() since we have to compare types.
+        if sys.version_info >= (3, 10) and origin_type is types.UnionType:
+            return _UnionGenericAlias(origin_type, resolved_type_args)
         # NotRequired[T] and Required[T] don't support tuple type resolved_type_args, hence the condition below
         return origin_type[resolved_type_args[0] if len(resolved_type_args) == 1 else resolved_type_args]
 
@@ -354,57 +348,54 @@ def replace_types(type_: Any, type_map: Mapping[TypeVar, Any] | None) -> Any:
     return type_map.get(type_, type_)
 
 
-def map_generic_model_arguments(cls: type[BaseModel], args: tuple[Any, ...]) -> dict[TypeVar, Any]:
-    """Return a mapping between the parameters of a generic model and the provided arguments during parameterization.
+def has_instance_in_type(type_: Any, isinstance_target: Any) -> bool:
+    """Checks if the type, or any of its arbitrary nested args, satisfy
+    `isinstance(<type>, isinstance_target)`.
+    """
+    if isinstance(type_, isinstance_target):
+        return True
+    if _typing_extra.is_annotated(type_):
+        return has_instance_in_type(type_.__origin__, isinstance_target)
+    if _typing_extra.is_literal(type_):
+        return False
+
+    type_args = get_args(type_)
+
+    # Having type args is a good indicator that this is a typing module
+    # class instantiation or a generic alias of some sort.
+    for arg in type_args:
+        if has_instance_in_type(arg, isinstance_target):
+            return True
+
+    # Handle special case for typehints that can have lists as arguments.
+    # `typing.Callable[[int, str], int]` is an example for this.
+    if (
+        isinstance(type_, list)
+        # On Python < 3.10, typing_extensions implements `ParamSpec` as a subclass of `list`:
+        and not isinstance(type_, typing_extensions.ParamSpec)
+    ):
+        for element in type_:
+            if has_instance_in_type(element, isinstance_target):
+                return True
+
+    return False
+
+
+def check_parameters_count(cls: type[BaseModel], parameters: tuple[Any, ...]) -> None:
+    """Check the generic model parameters count is equal.
+
+    Args:
+        cls: The generic model.
+        parameters: A tuple of passed parameters to the generic model.
 
     Raises:
-        TypeError: If the number of arguments does not match the parameters (i.e. if providing too few or too many arguments).
-
-    Example:
-        ```python {test="skip" lint="skip"}
-        class Model[T, U, V = int](BaseModel): ...
-
-        map_generic_model_arguments(Model, (str, bytes))
-        #> {T: str, U: bytes, V: int}
-
-        map_generic_model_arguments(Model, (str,))
-        #> TypeError: Too few arguments for <class '__main__.Model'>; actual 1, expected at least 2
-
-        map_generic_model_arguments(Model, (str, bytes, int, complex))
-        #> TypeError: Too many arguments for <class '__main__.Model'>; actual 4, expected 3
-        ```
-
-    Note:
-        This function is analogous to the private `typing._check_generic_specialization` function.
+        TypeError: If the passed parameters count is not equal to generic model parameters count.
     """
-    parameters = cls.__pydantic_generic_metadata__['parameters']
-    expected_len = len(parameters)
-    typevars_map: dict[TypeVar, Any] = {}
-
-    _missing = object()
-    for parameter, argument in zip_longest(parameters, args, fillvalue=_missing):
-        if parameter is _missing:
-            raise TypeError(f'Too many arguments for {cls}; actual {len(args)}, expected {expected_len}')
-
-        if argument is _missing:
-            param = cast(TypeVar, parameter)
-            try:
-                has_default = param.has_default()  # pyright: ignore[reportAttributeAccessIssue]
-            except AttributeError:
-                # Happens if using `typing.TypeVar` (and not `typing_extensions`) on Python < 3.13.
-                has_default = False
-            if has_default:
-                # The default might refer to other type parameters. For an example, see:
-                # https://typing.python.org/en/latest/spec/generics.html#type-parameters-as-parameters-to-generics
-                typevars_map[param] = replace_types(param.__default__, typevars_map)  # pyright: ignore[reportAttributeAccessIssue]
-            else:
-                expected_len -= sum(hasattr(p, 'has_default') and p.has_default() for p in parameters)  # pyright: ignore[reportAttributeAccessIssue]
-                raise TypeError(f'Too few arguments for {cls}; actual {len(args)}, expected at least {expected_len}')
-        else:
-            param = cast(TypeVar, parameter)
-            typevars_map[param] = argument
-
-    return typevars_map
+    actual = len(parameters)
+    expected = len(cls.__pydantic_generic_metadata__['parameters'])
+    if actual != expected:
+        description = 'many' if actual > expected else 'few'
+        raise TypeError(f'Too {description} parameters for {cls}; actual {actual}, expected {expected}')
 
 
 _generic_recursion_cache: ContextVar[set[str] | None] = ContextVar('_generic_recursion_cache', default=None)
@@ -413,7 +404,7 @@ _generic_recursion_cache: ContextVar[set[str] | None] = ContextVar('_generic_rec
 @contextmanager
 def generic_recursion_self_type(
     origin: type[BaseModel], args: tuple[Any, ...]
-) -> Generator[PydanticRecursiveRef | None]:
+) -> Iterator[PydanticRecursiveRef | None]:
     """This contextmanager should be placed around the recursive calls used to build a generic type,
     and accept as arguments the generic origin type and the type arguments being passed to it.
 
@@ -429,7 +420,7 @@ def generic_recursion_self_type(
         token = None
 
     try:
-        type_ref = _type_refs.model_type_ref(origin, args_override=args)
+        type_ref = get_type_ref(origin, args_override=args)
         if type_ref in previously_seen_type_refs:
             self_type = PydanticRecursiveRef(type_ref=type_ref)
             yield self_type
@@ -450,20 +441,6 @@ def recursively_defined_type_refs() -> set[str]:
     return visited.copy()  # don't allow modifications
 
 
-def _generic_cache_get(key: GenericTypesCacheKey) -> type[BaseModel] | None:
-    try:
-        return _GENERIC_TYPES_CACHE.get(key)
-    except TypeError:  # unhashable typevar values
-        return None
-
-
-def _generic_cache_set(key: GenericTypesCacheKey, value: type[BaseModel]) -> None:
-    try:
-        _GENERIC_TYPES_CACHE[key] = value
-    except TypeError:  # unhashable typevar values
-        pass
-
-
 def get_cached_generic_type_early(parent: type[BaseModel], typevar_values: Any) -> type[BaseModel] | None:
     """The use of a two-stage cache lookup approach was necessary to have the highest performance possible for
     repeated calls to `__class_getitem__` on generic types (which may happen in tighter loops during runtime),
@@ -481,14 +458,14 @@ def get_cached_generic_type_early(parent: type[BaseModel], typevar_values: Any) 
     during validation, I think it is worthwhile to ensure that types that are functionally equivalent are actually
     equal.
     """
-    return _generic_cache_get(_early_cache_key(parent, typevar_values))
+    return _GENERIC_TYPES_CACHE.get(_early_cache_key(parent, typevar_values))
 
 
 def get_cached_generic_type_late(
     parent: type[BaseModel], typevar_values: Any, origin: type[BaseModel], args: tuple[Any, ...]
 ) -> type[BaseModel] | None:
     """See the docstring of `get_cached_generic_type_early` for more information about the two-stage cache lookup."""
-    cached = _generic_cache_get(_late_cache_key(origin, args, typevar_values))
+    cached = _GENERIC_TYPES_CACHE.get(_late_cache_key(origin, args, typevar_values))
     if cached is not None:
         set_cached_generic_type(parent, typevar_values, cached, origin, args)
     return cached
@@ -504,11 +481,11 @@ def set_cached_generic_type(
     """See the docstring of `get_cached_generic_type_early` for more information about why items are cached with
     two different keys.
     """
-    _generic_cache_set(_early_cache_key(parent, typevar_values), type_)
+    _GENERIC_TYPES_CACHE[_early_cache_key(parent, typevar_values)] = type_
     if len(typevar_values) == 1:
-        _generic_cache_set(_early_cache_key(parent, typevar_values[0]), type_)
+        _GENERIC_TYPES_CACHE[_early_cache_key(parent, typevar_values[0])] = type_
     if origin and args:
-        _generic_cache_set(_late_cache_key(origin, args, typevar_values), type_)
+        _GENERIC_TYPES_CACHE[_late_cache_key(origin, args, typevar_values)] = type_
 
 
 def _union_orderings_key(typevar_values: Any) -> Any:
@@ -525,8 +502,11 @@ def _union_orderings_key(typevar_values: Any) -> Any:
     (See https://github.com/python/cpython/issues/86483 for reference.)
     """
     if isinstance(typevar_values, tuple):
-        return tuple(_union_orderings_key(value) for value in typevar_values)
-    elif typing_objects.is_union(typing_extensions.get_origin(typevar_values)):
+        args_data = []
+        for value in typevar_values:
+            args_data.append(_union_orderings_key(value))
+        return tuple(args_data)
+    elif _typing_extra.is_union(typevar_values):
         return get_args(typevar_values)
     else:
         return ()

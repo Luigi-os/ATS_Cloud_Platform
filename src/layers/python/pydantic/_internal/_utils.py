@@ -7,29 +7,24 @@ from __future__ import annotations as _annotations
 
 import dataclasses
 import keyword
-import warnings
+import typing
 import weakref
 from collections import OrderedDict, defaultdict, deque
-from collections.abc import Callable, Iterable, Mapping
-from collections.abc import Set as AbstractSet
 from copy import deepcopy
 from functools import cached_property
 from inspect import Parameter
 from itertools import zip_longest
-from types import BuiltinFunctionType, CodeType, FunctionType, GeneratorType, LambdaType, ModuleType, NoneType
-from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeGuard, TypeVar, overload
+from types import BuiltinFunctionType, CodeType, FunctionType, GeneratorType, LambdaType, ModuleType
+from typing import Any, Callable, Mapping, TypeVar
 
-from pydantic_core import MISSING, PydanticUndefined
-from typing_extensions import deprecated
-
-from pydantic import PydanticDeprecatedSince211
+from typing_extensions import TypeAlias, TypeGuard
 
 from . import _repr, _typing_extra
 from ._import_utils import import_cached_base_model
 
-if TYPE_CHECKING:
-    MappingIntStrAny: TypeAlias = Mapping[int, Any] | Mapping[str, Any]
-    AbstractSetIntStr: TypeAlias = AbstractSet[int] | AbstractSet[str]
+if typing.TYPE_CHECKING:
+    MappingIntStrAny: TypeAlias = 'typing.Mapping[int, Any] | typing.Mapping[str, Any]'
+    AbstractSetIntStr: TypeAlias = 'typing.AbstractSet[int] | typing.AbstractSet[str]'
     from ..main import BaseModel
 
 
@@ -42,7 +37,7 @@ IMMUTABLE_NON_COLLECTIONS_TYPES: set[type[Any]] = {
     bool,
     bytes,
     type,
-    NoneType,
+    _typing_extra.NoneType,
     FunctionType,
     BuiltinFunctionType,
     LambdaType,
@@ -50,7 +45,7 @@ IMMUTABLE_NON_COLLECTIONS_TYPES: set[type[Any]] = {
     CodeType,
     # note: including ModuleType will differ from behaviour of deepcopy by not producing error.
     # It might be not a good idea in general, but considering that this function used only internally
-    # against default values of fields, this will allow one to actually have a field with module as default value
+    # against default values of fields, this will allow to actually have a field with module as default value
     ModuleType,
     NotImplemented.__class__,
     Ellipsis.__class__,
@@ -149,7 +144,7 @@ T = TypeVar('T')
 def unique_list(
     input_list: list[T] | tuple[T, ...],
     *,
-    name_factory: Callable[[T], str] = str,
+    name_factory: typing.Callable[[T], str] = str,
 ) -> list[T]:
     """Make a list unique while maintaining order.
     We update the list if another one with the same name is set
@@ -171,7 +166,7 @@ def unique_list(
 class ValueItems(_repr.Representation):
     """Class for more convenient calculation of excluded or included fields on values."""
 
-    __slots__ = ('_items',)
+    __slots__ = ('_items', '_type')
 
     def __init__(self, value: Any, items: AbstractSetIntStr | MappingIntStrAny) -> None:
         items = self._coerce_items(items)
@@ -214,7 +209,7 @@ class ValueItems(_repr.Representation):
         normalized_items: dict[int | str, Any] = {}
         all_items = None
         for i, v in items.items():
-            if not (isinstance(v, Mapping) or isinstance(v, AbstractSet) or self.is_true(v)):
+            if not (isinstance(v, typing.Mapping) or isinstance(v, typing.AbstractSet) or self.is_true(v)):
                 raise TypeError(f'Unexpected type of exclude value for index "{i}" {v.__class__}')
             if i == '__all__':
                 all_items = self._coerce_value(v)
@@ -279,9 +274,9 @@ class ValueItems(_repr.Representation):
 
     @staticmethod
     def _coerce_items(items: AbstractSetIntStr | MappingIntStrAny) -> MappingIntStrAny:
-        if isinstance(items, Mapping):
+        if isinstance(items, typing.Mapping):
             pass
-        elif isinstance(items, AbstractSet):
+        elif isinstance(items, typing.AbstractSet):
             items = dict.fromkeys(items, ...)  # type: ignore
         else:
             class_name = getattr(items, '__class__', '???')
@@ -302,7 +297,7 @@ class ValueItems(_repr.Representation):
         return [(None, self._items)]
 
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
 
     def LazyClassAttribute(name: str, get_value: Callable[[], T]) -> T: ...
 
@@ -322,7 +317,7 @@ else:
         def value(self) -> Any:
             return self.get_value()
 
-        def __get__(self, instance: Any, owner: type[Any]) -> Any:
+        def __get__(self, instance: Any, owner: type[Any]) -> None:
             if instance is None:
                 return self.value
             raise AttributeError(f'{self.name!r} attribute of {owner.__name__!r} is class-only')
@@ -336,8 +331,6 @@ def smart_deepcopy(obj: Obj) -> Obj:
     Use obj.copy() for built-in empty collections
     Use copy.deepcopy() for non-empty collections and unknown objects.
     """
-    if obj is MISSING or obj is PydanticUndefined:
-        return obj  # pyright: ignore[reportReturnType]
     obj_type = obj.__class__
     if obj_type in IMMUTABLE_NON_COLLECTIONS_TYPES:
         return obj  # fastest case: obj is immutable and not collection therefore will not be copied anyway
@@ -355,7 +348,7 @@ def smart_deepcopy(obj: Obj) -> Obj:
 _SENTINEL = object()
 
 
-def all_identical(left: Iterable[Any], right: Iterable[Any]) -> bool:
+def all_identical(left: typing.Iterable[Any], right: typing.Iterable[Any]) -> bool:
     """Check that the items of `left` are the same objects as those in `right`.
 
     >>> a, b = object(), object()
@@ -370,17 +363,16 @@ def all_identical(left: Iterable[Any], right: Iterable[Any]) -> bool:
     return True
 
 
-def get_first_not_none(a: Any, b: Any) -> Any:
-    """Return the first argument if it is not `None`, otherwise return the second argument."""
-    return a if a is not None else b
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class SafeGetItemProxy:
     """Wrapper redirecting `__getitem__` to `get` with a sentinel value as default
 
-    This makes it safe to use in `operator.itemgetter` when some keys may be missing
+    This makes is safe to use in `operator.itemgetter` when some keys may be missing
     """
+
+    # Define __slots__manually for performances
+    # @dataclasses.dataclass() only support slots=True in python>=3.10
+    __slots__ = ('wrapped',)
 
     wrapped: Mapping[str, Any]
 
@@ -391,43 +383,7 @@ class SafeGetItemProxy:
     # https://github.com/python/mypy/issues/13713
     # https://github.com/python/typeshed/pull/8785
     # Since this is typing-only, hide it in a typing.TYPE_CHECKING block
-    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
 
         def __contains__(self, key: str, /) -> bool:
             return self.wrapped.__contains__(key)
-
-
-_ModelT = TypeVar('_ModelT', bound='BaseModel')
-_RT = TypeVar('_RT')
-
-
-class deprecated_instance_property(Generic[_ModelT, _RT]):
-    """A decorator exposing the decorated class method as a property, with a warning on instance access.
-
-    This decorator takes a class method defined on the `BaseModel` class and transforms it into
-    an attribute. The attribute can be accessed on both the class and instances of the class. If accessed
-    via an instance, a deprecation warning is emitted stating that instance access will be removed in V3.
-    """
-
-    def __init__(self, fget: Callable[[type[_ModelT]], _RT], /) -> None:
-        # Note: fget should be a classmethod:
-        self.fget = fget
-
-    @overload
-    def __get__(self, instance: None, objtype: type[_ModelT]) -> _RT: ...
-    @overload
-    @deprecated(
-        'Accessing this attribute on the instance is deprecated, and will be removed in Pydantic V3. '
-        'Instead, you should access this attribute from the model class.',
-        category=None,
-    )
-    def __get__(self, instance: _ModelT, objtype: type[_ModelT]) -> _RT: ...
-    def __get__(self, instance: _ModelT | None, objtype: type[_ModelT]) -> _RT:
-        if instance is not None:
-            warnings.warn(
-                f'Accessing the {self.fget.__name__!r} attribute on the instance is deprecated. '
-                'Instead, you should access this attribute from the model class.',
-                category=PydanticDeprecatedSince211,
-                stacklevel=2,
-            )
-        return self.fget.__get__(instance, objtype)()

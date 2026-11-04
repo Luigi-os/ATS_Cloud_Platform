@@ -17,7 +17,7 @@ class PydanticRecursiveRef:
         """
 
     def __or__(self, other):
-        return Union[self, other]  # type: ignore  # noqa: UP007
+        return Union[self, other]  # type: ignore
 
     def __ror__(self, other):
-        return Union[other, self]  # type: ignore  # noqa: UP007
+        return Union[other, self]  # type: ignore

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Type, TypeVar, Union
 
 from typing_extensions import deprecated
 
@@ -18,7 +17,7 @@ if not TYPE_CHECKING:
 
 __all__ = 'parse_obj_as', 'schema_of', 'schema_json_of'
 
-NameFactory = Union[str, Callable[[type[Any]], str]]
+NameFactory = Union[str, Callable[[Type[Any]], str]]
 
 
 T = TypeVar('T')
