@@ -8,7 +8,7 @@ resource "aws_sqs_queue" "processing_queue" {
     receive_wait_time_seconds = 10 # Long polling wait time in seconds for the ReceiveMessage action.
     
     # Calculate the visibility timeout based on the expected processing time of the messages. The visibility timeout should be greater than the processing time to avoid message duplication.
-    visibility_timeout_seconds = 1080
+    visibility_timeout_seconds = 180
 }
 
 resource "aws_sqs_queue" "dlq" {

@@ -3,13 +3,13 @@ resource "aws_iam_role" "lambda_role" {
     name = "${local.name_prefix}-lambda-role"
     # Define the Trust Policy that allows the Lambda service to assume this role.
     assume_role_policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
+    "Version" = "2012-10-17"
+    "Statement" = [
         {
-            "Action": "sts:AssumeRole"
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "lambda.amazonaws.com" 
+            "Action" = "sts:AssumeRole"
+            "Effect" = "Allow"
+            "Principal" = {
+                "Service" = "lambda.amazonaws.com"
             },
         }
         ]
@@ -22,60 +22,49 @@ resource "aws_iam_role_policy" "lambda_policy" {
     role = aws_iam_role.lambda_role.id
     
     policy = jsonencode({
-    "Version": "2012-10-17",
-    "Statement": [
+        "Version" = "2012-10-17"
+        "Statement" = [
         {
-        "Sid": "S3IncomingBucketAccess",
-        "Effect": "Allow",
-        "Action": [
+        "Effect" = "Allow"
+        "Action" = [
             "s3:GetObject",
             "s3:DeleteObject"
-        ],
-        "Resource": "${aws_s3_bucket.cv_incoming_bucket.arn}/*" # The Lambda function needs to read and delete objects from the incoming S3 bucket.
+        ]
+        "Resource" = "${aws_s3_bucket.cv_incoming_bucket.arn}/*" # The Lambda function needs to read and delete objects from the incoming S3 bucket.
         },
         {
-        "Sid": "S3ArchiveBucketAccess",
-        "Effect": "Allow",
-        "Action": [
+        "Sid" = "S3ArchiveBucketAccess"
+        "Effect" = "Allow"
+        "Action" = [
             "s3:PutObject"
-        ],
-        "Resource": "${aws_s3_bucket.cv_archive_bucket.arn}/*" # The Lambda function needs to write objects to the archive S3 bucket.
+        ]
+        "Resource" = "${aws_s3_bucket.cv_archive_bucket.arn}/*" # The Lambda function needs to write objects to the archive S3 bucket.
         },
         {
-        "Sid": "SQSServiceAccess",
-        "Effect": "Allow",
-        "Action": [
+        "Sid" = "SQSServiceAccess"
+        "Effect" = "Allow"
+        "Action" = [
             "sqs:ReceiveMessage",
             "sqs:DeleteMessage",
             "sqs:GetQueueAttributes" 
-        ],
-        "Resource": "${aws_sqs_queue.processing_queue.arn}" # The Lambda function needs to receive and delete messages from the processing SQS queue.
+        ]
+        "Resource" = "${aws_sqs_queue.processing_queue.arn}" # The Lambda function needs to receive and delete messages from the processing SQS queue.
         },
         {
-        "Sid": "DynamoDBTableAccess",
-        "Effect": "Allow",
-        "Action": [
+        "Sid" = "DynamoDBTableAccess"
+        "Effect" = "Allow"
+        "Action" = [
             "dynamodb:PutItem"
-        ],
-        "Resource": "${aws_dynamodb_table.candidates_table.arn}" # The Lambda function needs to put items into the Candidates DynamoDB table.
+        ]
+        "Resource" = "${aws_dynamodb_table.candidates_table.arn}" # The Lambda function needs to put items into the Candidates DynamoDB table.
         },
         {
-        "Sid": "DynamoDBJobsReadAccess",
-        "Effect": "Allow",
-        "Action": [
+        "Sid" = "DynamoDBJobsReadAccess"
+        "Effect" = "Allow"
+        "Action" = [
             "dynamodb:GetItem"
-        ],
-        "Resource": "${aws_dynamodb_table.jobs_table.arn}"
-        },
-        {
-        "Sid": "CloudWatchLogging", 
-        "Effect": "Allow",
-        "Action": [
-            "logs:CreateLogGroup",
-            "logs:CreateLogStream",
-            "logs:PutLogEvents"
-        ],
-        "Resource": "arn:aws:logs:${var.region}:*:*" # The Lambda function needs to create log groups, log streams, and put log events in CloudWatch Logs.
+        ]
+        "Resource" = "${aws_dynamodb_table.jobs_table.arn}"
         }
         ]
     })
@@ -86,11 +75,11 @@ resource "aws_iam_role_policy" "lambda_policy" {
 resource "aws_iam_role" "api_lambda_role" {
   name = "${var.project-name}-api-lambda-role"
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
+    "Version" = "2012-10-17"
+    "Statement" = [{
+      "Action" = "sts:AssumeRole"
+      "Effect" = "Allow"
+      "Principal" = { "Service" = "lambda.amazonaws.com" }
     }]
   })
 }
@@ -101,43 +90,42 @@ resource "aws_iam_role_policy" "api_lambda_policy" {
     role = aws_iam_role.api_lambda_role.id
     
     policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
+        "Version" = "2012-10-17"
+        "Statement" = [
         {
-            Effect = "Allow"
-            Action = [
+            "Effect" = "Allow"
+            "Action" = [
             "dynamodb:Scan",
             "dynamodb:PutItem",
             "dynamodb:DeleteItem"
             ]
-            Resource = aws_dynamodb_table.jobs_table.arn
+            "Resource" = aws_dynamodb_table.jobs_table.arn
         },
         {
-            Effect = "Allow"
-            Action = [
+            "Effect" = "Allow"
+            "Action" = [
             "dynamodb:Query",
             "dynamodb:Scan"
             ]
-            Resource = [
+            "Resource" = [
             aws_dynamodb_table.candidates_table.arn,
             "${aws_dynamodb_table.candidates_table.arn}/index/*"
             ]
         },
         {
-            Effect = "Allow"
-            Action = [
+            "Effect" = "Allow"
+            "Action" = [
             "s3:PutObject"
             ]
-            Resource = "${aws_s3_bucket.cv_incoming_bucket.arn}/*"
+            "Resource" = "${aws_s3_bucket.cv_incoming_bucket.arn}/*"
         },
         {
-            Effect: "Allow"
-            Action: [
+            "Effect" = "Allow"
+            "Action" = [
             "s3:GetObject"
             ]
-            Resource: "${aws_s3_bucket.cv_archive_bucket.arn}/*"
+            "Resource" = "${aws_s3_bucket.cv_archive_bucket.arn}/*"
         }
         ]
     })
 }
-

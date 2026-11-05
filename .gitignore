@@ -17,3 +17,5 @@ override.tf.json
 venv/
 src/layers/python/
 src/layers/*.zip
+src/*.zip
+.vscode/

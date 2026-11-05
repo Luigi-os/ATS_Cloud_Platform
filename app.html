@@ -7,7 +7,7 @@
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
-            max-width: 700px;
+            max-width: 1000px;
             margin: 2rem auto;
             padding: 0 1rem;
             color: #333;
@@ -19,6 +19,9 @@
             border-radius: 6px;
             padding: 1.5rem;
             margin-bottom: 2rem;
+        }
+        .card.candidates-section {
+            max-width: 100%;
         }
         .form-group {
             margin-bottom: 1.25rem;
@@ -51,11 +54,16 @@
             padding: 0.4rem 0.8rem;
             font-size: 0.85rem;
         }
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 1rem;
             font-size: 0.9rem;
+            min-width: 800px;
         }
         th, td {
             border: 1px solid #e0e0e0;
@@ -129,10 +137,12 @@
         <button id="uploadCvBtn" style="width: 100%;">Invia Candidatura</button>
         <div id="candidateStatus" class="status"></div>
     </div>
+    
     <div class="card candidates-section" id="candidatesCard">
         <h2 id="candidatesTitle">Candidati</h2>
         <div id="candidatesContainer"></div>
     </div>
+
     <script>
         const API_BASE_URL = "https://eyijbj7s5l.execute-api.eu-north-1.amazonaws.com";
 
@@ -261,7 +271,6 @@
             showStatus(status, "Conversione e invio file in corso...", "info");
 
             try {
-                // Converte il file in stringa Base64 leggendolo come ArrayBuffer
                 const reader = new FileReader();
                 
                 const base64Data = await new Promise((resolve, reject) => {
@@ -299,9 +308,8 @@
             } finally {
                 btn.disabled = false;
             }
-}
+        }
 
-        // Funzione per caricare e mostrare i candidati di una posizione
         async function viewCandidates(jobId) {
             const card = document.getElementById('candidatesCard');
             const title = document.getElementById('candidatesTitle');
@@ -328,19 +336,20 @@
                 }
 
                 let tableHTML = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Pos</th>
-                                <th>ID Candidato</th>
-                                <th>Score</th>
-                                <th>Giustificazione</th>
-                                <th>Skills Coincidenti</th>
-                                <th>Skills Mancanti</th>
-                                <th>Curriculum</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Pos</th>
+                                    <th>ID Candidato</th>
+                                    <th>Score</th>
+                                    <th>Giustificazione</th>
+                                    <th>Skills Coincidenti</th>
+                                    <th>Skills Mancanti</th>
+                                    <th>Curriculum</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                 `;
 
                 candidates.forEach((cand, index) => {
@@ -365,8 +374,9 @@
                 });
 
                 tableHTML += `
-                        </tbody>
-                    </table>
+                            </tbody>
+                        </table>
+                    </div>
                 `;
 
                 container.innerHTML = tableHTML;

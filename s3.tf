@@ -2,7 +2,6 @@
 
 # S3 bucket for incoming files (cv-incoming-bucket) configuration.
 resource "aws_s3_bucket" "cv_incoming_bucket" {
-    
     bucket = local.bucket_incoming_name # Identifier for the S3 bucket. 
     force_destroy = true # Enable force_destroy to allow the bucket to be deleted even if it contains objects. This is useful for testing environments.
     tags = {
@@ -32,25 +31,12 @@ resource "aws_s3_bucket_notification" "incoming_bucket_notification" {
         queue_arn     = aws_sqs_queue.processing_queue.arn
         events        = ["s3:ObjectCreated:*"]
     }
-
     # With depends_on attribute this resource will be created after the SQS queue policy is created.
     depends_on = [
         aws_sqs_queue_policy.processing_queue_policy
     ]
 }
 
-# Configuration of the S3 bucket CORS (Cross-Origin Resource Sharing) to allow cross-origin requests from any origin.
-resource "aws_s3_bucket_cors_configuration" "incoming_bucket_cors" {
-  bucket = aws_s3_bucket.cv_incoming_bucket.id
-
-  cors_rule {
-    allowed_headers = ["*"]
-    allowed_methods = ["PUT", "POST"]
-    allowed_origins = ["*"]
-    expose_headers  = ["ETag"]
-    max_age_seconds = 3000
-  }
-}
 
 # Because the incoming bucket is public, we need to block public access to it. This is made because the project is private.
 resource "aws_s3_bucket_public_access_block" "cv_incoming_public_access_block" {
@@ -80,6 +66,18 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cv_archive_encryp
             sse_algorithm = "AES256"
         }
     }
+}
+
+resource "aws_s3_bucket_cors_configuration" "archive_bucket_cors" {
+  bucket = aws_s3_bucket.cv_archive_bucket.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET"]
+    allowed_origins = ["*"] # Allow all origins for GET requests to the archive bucket. This is useful for allowing access to the archived CVs from any domain.
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "cv_archive_public_access_block" {

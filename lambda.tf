@@ -26,7 +26,7 @@ resource "aws_lambda_function" "cv_llm_parser" {
   filename         = data.archive_file.lambda_zip.output_path 
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256 
 
-  timeout     = 180 # Left the timeout to 180 seconds for testing if the Lambda function can process the CVs in time. 
+  timeout     = 120 # Left the timeout to 180 seconds for testing if the Lambda function can process the CVs in time. 
   memory_size = 1024
 
   layers = [
@@ -49,7 +49,7 @@ resource "aws_lambda_event_source_mapping" "cv_llm_parser_sqs_mapping" {
   function_name    = aws_lambda_function.cv_llm_parser.arn
   batch_size       = 1
 
-  enabled = true
+  enabled = true # Enable the event source mapping to allow the Lambda function to be triggered by messages in the SQS queue.
 }
 
 # Define the Lambda function for the API backend.

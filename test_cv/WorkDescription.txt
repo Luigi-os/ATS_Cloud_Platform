@@ -1,0 +1,28 @@
+Descrizione della Posizione: Junior Backend Engineer
+Informazioni Generali
+Ruolo: Junior Backend Engineer
+
+Inquadramento: Contratto a tempo indeterminato / Apprendistato (CCNL Metalmeccanico o Commercio a seconda dell'azienda)
+
+Dipartimento: Engineering / Software Development
+
+Modalità di lavoro: Ibrido / Remoto
+
+Obiettivo del Ruolo
+Cerchiamo un/una Junior Backend Engineer motivato/a e appassionato/a, desideroso/a di crescere all'interno di un team di sviluppo agile. Il candidato ideale possiede solide basi di ingegneria del software, comprende i principi di progettazione delle API e desidera applicare le proprie competenze alla realizzazione di servizi backend scalabili, resilienti e sicuri. Lavorerai a stretto contatto con Senior Engineer, Frontend Developer e DevOps per progettare e mantenere architetture a microservizi o monolitiche distribuite.
+
+Responsabilità Principali
+Sviluppare e mantenere API RESTful e servizi backend ad alte prestazioni utilizzando linguaggi moderni (es. Go, Python, Node.js o Java).
+Scrivere codice pulito, testabile e manutenibile, applicando i principi di Clean Code e design pattern consolidati.
+Collaborare alla progettazione e all'ottimizzazione di database relazionali (es. PostgreSQL, MySQL) e non relazionali (es. Redis, MongoDB).
+Partecipare alle attività di code review all'interno del team per garantire standard qualitativi elevati.
+Integrare test automatici (unit test, integration test) all'interno delle pipeline di sviluppo.
+Contribuire alla risoluzione dei problemi di produzione (debugging) e al monitoraggio delle performance dei servizi.
+
+Requisiti Tecnici e Competenze (Tech Stack di Riferimento)
+Linguaggi di Programmazione: Ottima conoscenza di almeno un linguaggio backend (es. Python con FastAPI/Django, Go, Node.js con TypeScript, o Java con Spring Boot).
+Architetture e API: Comprensione dei principi di progettazione RESTful e dei pattern di comunicazione tra servizi.
+Database: Conoscenza dei database SQL e NoSQL, inclusi concetti di indicizzazione e ottimizzazione delle query.
+Version Control: Padronanza di Git e del flusso di lavoro basato su GitHub o GitLab (branching, pull request, merge conflict resolution).
+Containerizzazione: Familiarità di base con Docker per la containerizzazione delle applicazioni.
+Formazione: Laurea in Ingegneria Informatica, Informatica o percorsi di studio affini, oppure comprovata esperienza equivalente tramite progetti personali o bootcamp intensivi.
