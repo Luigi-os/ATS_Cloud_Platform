@@ -4,7 +4,6 @@
 .terraform/
 *.tfstate
 *.tfstate.*
-*.tfvars
 *.tfvars.json
 crash.log
 override.tf
@@ -19,3 +18,7 @@ src/layers/python/
 src/layers/*.zip
 src/*.zip
 .vscode/
+
+# Exclude sensitive files
+config.js
+*.tfvars

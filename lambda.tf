@@ -47,7 +47,7 @@ resource "aws_lambda_function" "cv_llm_parser" {
 resource "aws_lambda_event_source_mapping" "cv_llm_parser_sqs_mapping" {
   event_source_arn = aws_sqs_queue.processing_queue.arn
   function_name    = aws_lambda_function.cv_llm_parser.arn
-  batch_size       = 1
+  batch_size       = 1 
 
   enabled = true # Enable the event source mapping to allow the Lambda function to be triggered by messages in the SQS queue.
 }

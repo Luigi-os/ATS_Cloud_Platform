@@ -56,7 +56,7 @@ resource "aws_apigatewayv2_route" "upload_route" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
-# Output for the API Gateway endpoint URL.
+# # Set up the default stage for the API Gateway, enabling automatic deployment of changes to the API.
 resource "aws_apigatewayv2_stage" "default_stage" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "$default"

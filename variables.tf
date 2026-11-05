@@ -23,7 +23,7 @@ variable "region" {
 variable "gemini_api_key" {
   description = "API Key to authenticate requests to the Gemini API for CV parsing."
   type        = string
-  sensitive   = true
+  sensitive   = true 
 }
 
 # --------------------------- Local Variables --------------------------- #
